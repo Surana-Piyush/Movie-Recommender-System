@@ -2,3 +2,4 @@ TMDB_movie_dataset.csv
 movie.csv
 rating.csv
 movie_embeddings.npy
+.env
