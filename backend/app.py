@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from database import get_db, User
-from schema import UserCreate
-from auth import hash_password
+from schema import UserCreate,UserLogin,RatingCreate
+from auth import hash_password,verify_password
 
 app = FastAPI()
 
@@ -43,3 +43,29 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
         "username": new_user.username,
         "email": new_user.email
     }
+
+
+@app.post("/login")
+def login(user:UserLogin, db: Session = Depends(get_db)):
+
+    existing_user = db.execute(
+            select(User).where(User.email == user.email)
+        ).scalar_one_or_none()
+    
+    if existing_user is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Email already registered"
+        )
+
+    if not verify_password(user.password, existing_user.password_hash):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid password"
+        )
+
+    return {
+        "message": "Login successful"
+    }
+
+    
