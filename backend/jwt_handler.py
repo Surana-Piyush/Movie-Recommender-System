@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timedelta
-from jose import jwt
+from jose import JWTError, jwt
 from dotenv import load_dotenv
 from database import User
 
@@ -27,3 +27,18 @@ def create_token(user:User):
     )
 
     return token
+
+def verify_token(token):
+
+    try:
+        decode = jwt.decode(
+            token,
+            secret_key,
+            algorithms=[algorithm]
+        )
+
+        return decode
+
+    except JWTError:
+        return None 
+
