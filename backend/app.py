@@ -55,7 +55,7 @@ def login(user:UserLogin, db: Session = Depends(get_db)):
     if existing_user is None:
         raise HTTPException(
             status_code=400,
-            detail="Email already registered"
+            detail="User not found"
         )
 
     if not verify_password(user.password, existing_user.password_hash):
@@ -67,5 +67,7 @@ def login(user:UserLogin, db: Session = Depends(get_db)):
     return {
         "message": "Login successful"
     }
+
+
 
     
