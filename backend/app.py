@@ -6,6 +6,14 @@ from database import get_db, User
 from schema import UserCreate,UserLogin,RatingCreate
 from auth import hash_password,verify_password
 
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy.orm import Session
+from sqlalchemy import select
+
+from database import get_db, User, Rating
+from auth_dependencies import get_current_user
+from schema import UserCreate, UserLogin, RatingCreate
+
 app = FastAPI()
 
 
@@ -72,5 +80,87 @@ def login(user:UserLogin, db: Session = Depends(get_db)):
     }
 
 
+@app.post("/rating")
+def add_rating(
+    rating: RatingCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
 
-    
+    existing_rating = db.execute(
+        select(Rating).where(
+            Rating.user_id == current_user.user_id,
+            Rating.movie_id == rating.movie_id
+        )
+    ).scalar_one_or_none()
+
+    if existing_rating:
+
+        existing_rating.rating = rating.rating
+
+        db.commit()
+        db.refresh(existing_rating)
+
+        return {
+            "message": "Rating updated successfully",
+            "movie_id": existing_rating.movie_id,
+            "rating": existing_rating.rating
+        }
+
+    new_rating = Rating(
+        user_id=current_user.user_id,
+        movie_id=rating.movie_id,
+        rating=rating.rating
+    )
+
+    db.add(new_rating)
+    db.commit()
+    db.refresh(new_rating)
+
+    return {
+        "message": "Rating added successfully",
+        "movie_id": new_rating.movie_id,
+        "rating": new_rating.rating
+    }
+
+
+@app.get("/ratings")
+def get_my_ratings(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+
+    ratings = db.execute(
+        select(Rating).where(
+            Rating.user_id == current_user.user_id
+        )
+    ).scalars().all()
+
+    return ratings
+
+@app.delete("/rating/{movie_id}")
+def delete_rating(
+    movie_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+
+    rating = db.execute(
+        select(Rating).where(
+            Rating.user_id == current_user.user_id,
+            Rating.movie_id == movie_id
+        )
+    ).scalar_one_or_none()
+
+    if rating is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Rating not found"
+        )
+
+    db.delete(rating)
+    db.commit()
+
+    return {
+        "message": "Rating deleted successfully"
+    }
