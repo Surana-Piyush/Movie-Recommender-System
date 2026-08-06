@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-main: #0b0d12;
+    --bg-surface: #111318;
+    --bg-card: rgba(30, 31, 37, 0.6);
+    --primary-gold: #f5b94d;
+    --primary-light: #ffdaa0;
+    --accent-mint: #42e09a;
+    --accent-mint-bright: #65fdb5;
+  }
+
+  body {
+    background-color: var(--bg-main);
+    color: #e2e2e9;
+    font-family: 'Inter', sans-serif;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Sora', sans-serif;
+  }
+}
+
+/* Glassmorphism Classes */
+.glass-panel {
+  background: rgba(17, 19, 24, 0.7);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-card {
+  background: rgba(30, 31, 37, 0.45);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.glass-dropdown {
+  background: rgba(12, 14, 19, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.scrim-bottom {
+  background: linear-gradient(to top, rgba(11, 13, 18, 0.95) 0%, rgba(11, 13, 18, 0.5) 50%, rgba(11, 13, 18, 0) 100%);
+}
+
+.gradient-text-gold {
+  background: linear-gradient(90deg, #ffdaa0, #f5b94d);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.gradient-text-mint {
+  background: linear-gradient(90deg, #ffdaa0, #42e09a);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(11, 13, 18, 0.8);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(245, 185, 77, 0.25);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(245, 185, 77, 0.5);
+}

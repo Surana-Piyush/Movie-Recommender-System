@@ -1,5 +1,5 @@
-from sqlalchemy import String,Integer,Column
-from sqlalchemy.orm import declarative_base,create_engine,sessionmaker
+from sqlalchemy import String,Integer,Column,create_engine
+from sqlalchemy.orm import declarative_base,sessionmaker
 
 DB_URL = "sqlite:///movies.db"
 engine = create_engine(DB_URL)

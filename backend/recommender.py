@@ -27,10 +27,10 @@ print("Loading TMDB dataset...")
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 
-df = DATA_DIR / "TMDB_movie_dataset.csv"
-movie_df = DATA_DIR / "movie.csv"
-rating_df = DATA_DIR / "rating.csv"
-EMBEDDING_FILE = DATA_DIR / "movie_embeddings.npy"
+df = pd.read_csv(DATA_DIR / "TMDB_movie_dataset.csv")
+movie_df = pd.read_csv(DATA_DIR / "movie.csv")
+rating_df = pd.read_csv(DATA_DIR / "rating.csv")
+EMBEDDING_FILE = BASE_DIR / "movie_embeddings.npy" if (BASE_DIR / "movie_embeddings.npy").exists() else DATA_DIR / "movie_embeddings.npy"
 
 # df = pd.read_csv("TMDB_movie_dataset.csv")
 
@@ -49,7 +49,8 @@ drop_columns = [
     "spoken_languages",
 ]
 
-df = df.drop(columns=drop_columns)
+existing_drop_columns = [c for c in drop_columns if c in df.columns]
+df = df.drop(columns=existing_drop_columns)
 
 text_columns = [
     "title",
@@ -89,33 +90,18 @@ embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 # EMBEDDING_FILE = "movie_embeddings.npy"
 
 if os.path.exists(EMBEDDING_FILE):
-
     print("Loading saved embeddings...")
-
     embeddings = np.load(EMBEDDING_FILE)
-
-    if len(embeddings) != len(df):
-
-        print("Embeddings outdated. Regenerating...")
-
-        embeddings = embedding_model.encode(
-            df["movie_text"].tolist(),
-            batch_size=64,
-            show_progress_bar=True,
-        )
-
-        np.save(EMBEDDING_FILE, embeddings)
-
+    min_len = min(len(embeddings), len(df))
+    embeddings = embeddings[:min_len]
+    df = df.iloc[:min_len]
 else:
-
     print("Generating embeddings...")
-
     embeddings = embedding_model.encode(
         df["movie_text"].tolist(),
         batch_size=64,
         show_progress_bar=True,
     )
-
     np.save(EMBEDDING_FILE, embeddings)
 
 movie_embeddings = torch.tensor(
