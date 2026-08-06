@@ -14,7 +14,40 @@ from database import get_db, User, Rating
 from auth_dependencies import get_current_user
 from schema import UserCreate, UserLogin, RatingCreate
 
+from recommender import (
+    semantic_search,
+    similar_movie,
+    recommend_movies
+)
+
+from schema import (
+    UserCreate,
+    UserLogin,
+    RatingCreate,
+    SemanticSearchRequest,
+    SimilarMovieRequest,
+    HybridRecommendationRequest
+)
+
+from tmdb import getDetails
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/")
+def root():
+    return {
+        "status": "Running",
+        "message": "Movie Recommendation API"
+    }
 
 
 @app.post("/register")
@@ -163,4 +196,75 @@ def delete_rating(
 
     return {
         "message": "Rating deleted successfully"
+    }
+
+@app.post("/semantic-search")
+def semantic_search_api(request: SemanticSearchRequest):
+
+    results = semantic_search(request.query)
+
+    movies = []
+
+    for movie in results:
+
+        details = getDetails(movie["title"])
+
+        if details:
+            details["score"] = movie["score"]
+            movies.append(details)
+
+    return {
+        "count": len(movies),
+        "results": movies
+    }
+
+@app.post("/similar-movie")
+def similar_movie_api(request: SimilarMovieRequest):
+
+    results = similar_movie(request.movie_title)
+
+    movies = []
+
+    for movie in results:
+
+        details = getDetails(movie["title"])
+
+        if details:
+            details["score"] = movie["score"]
+            movies.append(details)
+
+    return {
+        "count": len(movies),
+        "results": movies
+    }
+
+@app.post("/recommend")
+def recommend_api(request: HybridRecommendationRequest):
+
+    results = recommend_movies(request.ratings)
+
+    movies = []
+
+    for movie in results:
+
+        details = getDetails(movie["title"])
+
+        if details:
+            details["score"] = movie["score"]
+            movies.append(details)
+
+    return {
+        "count": len(movies),
+        "results": movies
+    }
+
+@app.get("/profile")
+def get_profile(
+    current_user: User = Depends(get_current_user)
+):
+
+    return {
+        "user_id": current_user.user_id,
+        "username": current_user.username,
+        "email": current_user.email
     }

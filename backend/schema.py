@@ -14,3 +14,14 @@ class UserLogin(BaseModel):
 class RatingCreate(BaseModel):
     movie_id: int
     rating: int
+
+class SemanticSearchRequest(BaseModel):
+    query: str
+
+
+class SimilarMovieRequest(BaseModel):
+    movie_title: str
+
+
+class HybridRecommendationRequest(BaseModel):
+    ratings: dict[str, float]
