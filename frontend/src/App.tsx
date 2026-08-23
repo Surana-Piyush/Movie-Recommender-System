@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
@@ -12,8 +12,14 @@ import { Profile } from './pages/Profile';
 import { MovieDetail } from './pages/MovieDetail';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { PublicRoute } from './components/PublicRoute';
+import { recommendationService } from './services/recommendation';
 
 export const App: React.FC = () => {
+  useEffect(() => {
+    // Silent background pre-warm on app mount
+    recommendationService.pingWarmup();
+  }, []);
+
   return (
     <Routes>
       {/* Public Landing Page */}

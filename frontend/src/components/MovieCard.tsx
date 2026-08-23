@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Star, Sparkles, Eye } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Star, Sparkles, Eye, Film } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import type { Movie } from '../types';
 import { RatingModal } from './RatingModal';
 
@@ -11,7 +11,9 @@ interface MovieCardProps {
 }
 
 export const MovieCard: React.FC<MovieCardProps> = ({ movie, userRating }) => {
+  const navigate = useNavigate();
   const [isRatingOpen, setIsRatingOpen] = useState(false);
+  const [imgError, setImgError] = useState(false);
 
   const releaseYear = movie.release_date
     ? new Date(movie.release_date).getFullYear()
@@ -21,6 +23,21 @@ export const MovieCard: React.FC<MovieCardProps> = ({ movie, userRating }) => {
     ? Math.round(movie.score * 100)
     : null;
 
+  const getPosterUrl = (url?: string | null) => {
+    if (!url) return null;
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    if (url.startsWith('/')) return `https://image.tmdb.org/t/p/w500${url}`;
+    return url;
+  };
+
+  const posterSrc = getPosterUrl(movie.poster);
+
+  const handleCardClick = () => {
+    if (movie.tmdb_id) {
+      navigate(`/movie/${movie.tmdb_id}`);
+    }
+  };
+
   return (
     <>
       <motion.div
@@ -28,20 +45,24 @@ export const MovieCard: React.FC<MovieCardProps> = ({ movie, userRating }) => {
         animate={{ opacity: 1, y: 0 }}
         whileHover={{ y: -6, scale: 1.02 }}
         transition={{ duration: 0.25 }}
+        onClick={handleCardClick}
         className="group relative flex flex-col glass-card rounded-2xl overflow-hidden shadow-xl border border-white/5 hover:border-[#f5b94d]/30 transition-all duration-300 cursor-pointer h-full"
       >
         <div className="relative aspect-[2/3] w-full overflow-hidden bg-[#0c0e13]">
-          {movie.poster ? (
+          {posterSrc && !imgError ? (
             <img
-              src={movie.poster}
+              src={posterSrc}
               alt={movie.title}
+              onError={() => setImgError(true)}
               className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
               loading="lazy"
             />
           ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center p-4 bg-gray-900 text-gray-500">
-              <Film className="w-12 h-12 mb-2" />
-              <span className="text-xs text-center">{movie.title}</span>
+            <div className="w-full h-full flex flex-col items-center justify-center p-4 bg-gradient-to-b from-[#181a20] to-[#0d0e12] border border-white/5 text-gray-400 group-hover:text-[#ffdaa0] transition-colors relative overflow-hidden">
+              <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#f5b94d_1px,transparent_1px)] [background-size:16px_16px]" />
+              <Film className="w-12 h-12 mb-3 text-[#f5b94d]/60 group-hover:scale-110 transition-transform duration-300" />
+              <span className="text-xs font-bold text-center line-clamp-2 px-2 text-gray-200">{movie.title}</span>
+              <span className="text-[10px] text-gray-500 mt-1 font-semibold">{releaseYear}</span>
             </div>
           )}
 
@@ -68,18 +89,23 @@ export const MovieCard: React.FC<MovieCardProps> = ({ movie, userRating }) => {
             </div>
           )}
 
-          <div className="absolute inset-0 flex flex-col justify-end p-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-t from-[#0b0d12] via-[#0b0d12]/70 to-transparent">
-            <p className="text-xs text-gray-300 line-clamp-3 mb-4 leading-relaxed font-body">
+          <div className="absolute inset-0 flex flex-col justify-end p-3 sm:p-4 z-20 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-t from-[#0b0d12] via-[#0b0d12]/80 sm:via-[#0b0d12]/70 to-transparent">
+            <p className="text-xs text-gray-300 line-clamp-2 sm:line-clamp-3 mb-3 sm:mb-4 leading-relaxed font-body hidden sm:block">
               {movie.overview || 'No synopsis available for this title.'}
             </p>
 
-            <div className="grid grid-cols-2 gap-2">
-              <Link
-                to={`/movie/${movie.tmdb_id}`}
-                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-xs transition-colors backdrop-blur-sm"
+            <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleCardClick();
+                }}
+                className="flex items-center justify-center gap-1 sm:gap-1.5 px-2.5 py-1.5 sm:py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white font-semibold text-[11px] sm:text-xs transition-colors backdrop-blur-md"
               >
-                <Eye className="w-3.5 h-3.5" /> Details
-              </Link>
+                <Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5" /> Details
+              </button>
 
               <button
                 type="button"
@@ -88,25 +114,25 @@ export const MovieCard: React.FC<MovieCardProps> = ({ movie, userRating }) => {
                   e.stopPropagation();
                   setIsRatingOpen(true);
                 }}
-                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-[#f5b94d] to-[#42e09a] text-[#111318] font-bold text-xs transition-all hover:brightness-110 shadow-lg"
+                className="flex items-center justify-center gap-1 sm:gap-1.5 px-2.5 py-1.5 sm:py-2 rounded-xl bg-gradient-to-r from-[#f5b94d] to-[#42e09a] text-[#111318] font-bold text-[11px] sm:text-xs transition-all hover:brightness-110 shadow-lg"
               >
-                <Star className="w-3.5 h-3.5 fill-[#111318]" /> Rate
+                <Star className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-[#111318]" /> Rate
               </button>
             </div>
           </div>
         </div>
 
-        <div className="p-4 flex flex-col justify-between flex-1 bg-[#111318]/50">
+        <div className="p-3 sm:p-4 flex flex-col justify-between flex-1 bg-[#111318]/50">
           <div>
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <span className="text-xs font-semibold text-gray-400">{releaseYear}</span>
-              <div className="flex items-center gap-1 text-[#f5b94d] font-bold text-xs">
-                <Star className="w-3.5 h-3.5 fill-[#f5b94d]" />
+            <div className="flex items-center justify-between gap-1.5 mb-1">
+              <span className="text-[11px] sm:text-xs font-semibold text-gray-400">{releaseYear}</span>
+              <div className="flex items-center gap-1 text-[#f5b94d] font-bold text-[11px] sm:text-xs">
+                <Star className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-[#f5b94d]" />
                 <span>{movie.rating ? movie.rating.toFixed(1) : 'N/A'}</span>
               </div>
             </div>
 
-            <h3 className="font-bold text-sm font-headline text-white line-clamp-1 group-hover:text-[#ffdaa0] transition-colors">
+            <h3 className="font-bold text-xs sm:text-sm font-headline text-white line-clamp-1 group-hover:text-[#ffdaa0] transition-colors">
               {movie.title}
             </h3>
           </div>
@@ -119,25 +145,10 @@ export const MovieCard: React.FC<MovieCardProps> = ({ movie, userRating }) => {
         movie={{
           tmdb_id: movie.tmdb_id,
           title: movie.title,
-          poster: movie.poster,
+          poster: posterSrc,
         }}
         existingRating={userRating}
       />
     </>
   );
 };
-
-function Film(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      {...props}
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <rect width="18" height="18" x="3" y="3" rx="2" strokeWidth="2" />
-      <path strokeWidth="2" d="M7 3v18M17 3v18M3 7.5h4M3 12h18M3 16.5h4M17 7.5h4M17 16.5h4" />
-    </svg>
-  );
-}

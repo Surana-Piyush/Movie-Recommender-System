@@ -38,14 +38,14 @@ export const Landing: React.FC = () => {
       year: '2024',
       rating: 8.5,
       match: '99% Match',
-      poster: 'https://image.tmdb.org/t/p/w500/1pdfLPoWuVBQLuPjB7d3d8fW24E.jpg',
+      poster: 'https://image.tmdb.org/t/p/w500/6izwz7rsy95ARzTR3poZ8H6c5pp.jpg',
     },
     {
       title: 'Interstellar',
       year: '2014',
       rating: 8.6,
       match: '97% Match',
-      poster: 'https://image.tmdb.org/t/p/w500/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg',
+      poster: 'https://image.tmdb.org/t/p/w500/yQvGrMoipbRoddT0ZR8tPoR7NfX.jpg',
     },
     {
       title: 'Blade Runner 2049',
@@ -59,7 +59,7 @@ export const Landing: React.FC = () => {
       year: '2016',
       rating: 7.9,
       match: '93% Match',
-      poster: 'https://image.tmdb.org/t/p/w500/4ImAOt7p2b9F4bZOSByNycYxKu9.jpg',
+      poster: 'https://image.tmdb.org/t/p/w500/pEzNVQfdzYDzVK0XqxERIw2x2se.jpg',
     },
   ];
 

@@ -33,6 +33,7 @@ export interface Movie {
 export interface MovieResponse {
   count: number;
   results: Movie[];
+  has_more?: boolean;
 }
 
 export interface Rating {

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Mail, Shield, Star, Film, LogOut, Sparkles } from 'lucide-react';
+import { User, Mail, Award, Star, Film, LogOut, Sparkles } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { Sidebar } from '../components/Sidebar';
 import { useAuth } from '../contexts/AuthContext';
@@ -9,6 +9,17 @@ export const Profile: React.FC = () => {
   const { user, logout } = useAuth();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const { data: myRatings } = useMyRatings();
+
+  const ratingCount = myRatings?.length || 0;
+
+  const getCinephileRank = (count: number) => {
+    if (count === 0) return { title: 'Movie Explorer', level: 'Level 1' };
+    if (count < 5) return { title: 'Casual Viewer', level: 'Level 2' };
+    if (count < 15) return { title: 'Film Enthusiast', level: 'Level 3' };
+    return { title: 'Cinephile Critic', level: 'Level 4' };
+  };
+
+  const rankInfo = getCinephileRank(ratingCount);
 
   return (
     <div className="min-h-screen bg-[#0b0d12] text-white flex flex-col">
@@ -38,7 +49,7 @@ export const Profile: React.FC = () => {
           <div className="glass-card p-6 rounded-3xl border border-white/10 flex flex-col items-center text-center">
             <Star className="w-8 h-8 text-[#f5b94d] fill-[#f5b94d] mb-2" />
             <span className="text-3xl font-bold font-headline text-white">
-              {myRatings?.length || 0}
+              {ratingCount}
             </span>
             <span className="text-xs text-gray-400 font-semibold mt-1">Movies Rated</span>
           </div>
@@ -46,15 +57,19 @@ export const Profile: React.FC = () => {
           <div className="glass-card p-6 rounded-3xl border border-white/10 flex flex-col items-center text-center">
             <Film className="w-8 h-8 text-[#42e09a] mb-2" />
             <span className="text-lg font-bold font-headline text-[#ffdaa0] truncate max-w-full">
-              Sci-Fi & Cyberpunk
+              {ratingCount === 0 ? 'No Ratings Yet' : 'Diverse Taste'}
             </span>
-            <span className="text-xs text-gray-400 font-semibold mt-1">Top Taste Signature</span>
+            <span className="text-xs text-gray-400 font-semibold mt-1">
+              {ratingCount === 0 ? 'Rate movies to reveal' : 'Top Taste Signature'}
+            </span>
           </div>
 
           <div className="glass-card p-6 rounded-3xl border border-white/10 flex flex-col items-center text-center">
-            <Shield className="w-8 h-8 text-[#65fdb5] mb-2" />
-            <span className="text-lg font-bold font-headline text-[#65fdb5]">JWT Encrypted</span>
-            <span className="text-xs text-gray-400 font-semibold mt-1">Security Status</span>
+            <Award className="w-8 h-8 text-[#65fdb5] mb-2" />
+            <span className="text-lg font-bold font-headline text-[#65fdb5] truncate max-w-full">
+              {rankInfo.title}
+            </span>
+            <span className="text-xs text-gray-400 font-semibold mt-1">Cinephile Rank ({rankInfo.level})</span>
           </div>
         </section>
 

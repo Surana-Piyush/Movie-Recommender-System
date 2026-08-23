@@ -6,7 +6,7 @@ export const useMyRatings = () => {
   return useQuery<Rating[], Error>({
     queryKey: ['ratings'],
     queryFn: ratingService.getMyRatings,
-    staleTime: 1000 * 60 * 2,
+    staleTime: 0,
   });
 };
 
@@ -17,6 +17,7 @@ export const useAddOrUpdateRating = () => {
       ratingService.addOrUpdateRating(movieId, rating),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ratings'] });
+      queryClient.refetchQueries({ queryKey: ['ratings'] });
     },
   });
 };
@@ -27,6 +28,7 @@ export const useDeleteRating = () => {
     mutationFn: (movieId: number) => ratingService.deleteRating(movieId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ratings'] });
+      queryClient.refetchQueries({ queryKey: ['ratings'] });
     },
   });
 };

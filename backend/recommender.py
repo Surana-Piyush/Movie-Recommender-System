@@ -14,7 +14,7 @@ from pathlib import Path
 # ==========================================================
 
 ALPHA = 0.7
-TOP_K = 10
+TOP_K = 50
 
 # ==========================================================
 # Load TMDB Dataset
@@ -81,7 +81,10 @@ df["movie_text"] = (
 
 print("Loading SentenceTransformer model...")
 
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+try:
+    embedding_model = SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
+except Exception:
+    embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # ==========================================================
 # Movie Embeddings
@@ -104,12 +107,57 @@ else:
     )
     np.save(EMBEDDING_FILE, embeddings)
 
+# Keep torch tensor for any remaining legacy code
 movie_embeddings = torch.tensor(
     embeddings,
     dtype=torch.float32
 )
 
 print(f"Loaded {len(movie_embeddings)} movie embeddings.")
+
+# ==========================================================
+# FAISS Approximate Nearest Neighbor Index
+# ==========================================================
+
+import faiss
+
+FAISS_INDEX_FILE = BASE_DIR / "faiss_index.bin"
+EMBEDDING_DIM = embeddings.shape[1]  # 384 for all-MiniLM-L6-v2
+
+# Normalize embeddings for cosine similarity (inner product on L2-normed vectors)
+embeddings_f32 = embeddings.astype(np.float32).copy()
+faiss.normalize_L2(embeddings_f32)
+
+if os.path.exists(FAISS_INDEX_FILE):
+    print("Loading saved FAISS index...")
+    faiss_index = faiss.read_index(str(FAISS_INDEX_FILE))
+    print(f"FAISS index loaded: {faiss_index.ntotal} vectors.")
+else:
+    print("Building FAISS IVF index (one-time operation)...")
+
+    # IVF with flat inner-product quantizer
+    # nlist = number of Voronoi cells; sqrt(n) is a good starting point
+    nlist = int(np.sqrt(len(embeddings_f32)))
+    nlist = max(nlist, 100)  # minimum 100 cells
+
+    quantizer = faiss.IndexFlatIP(EMBEDDING_DIM)
+    faiss_index = faiss.IndexIVFFlat(
+        quantizer, EMBEDDING_DIM, nlist, faiss.METRIC_INNER_PRODUCT
+    )
+
+    print(f"  Training IVF with {nlist} cells on {len(embeddings_f32)} vectors...")
+    faiss_index.train(embeddings_f32)
+
+    print("  Adding vectors to index...")
+    faiss_index.add(embeddings_f32)
+
+    faiss.write_index(faiss_index, str(FAISS_INDEX_FILE))
+    print(f"  FAISS index saved to {FAISS_INDEX_FILE}")
+
+# Number of cells to probe at query time (higher = better recall, slower)
+faiss_index.nprobe = 40
+
+print(f"FAISS index ready: {faiss_index.ntotal} vectors, dim={EMBEDDING_DIM}")
 
 # ==========================================================
 # Weighted Rating
@@ -230,7 +278,7 @@ knn_model.fit(movie_user_matrix)
 print("Recommender initialized successfully.")
 
 # ==========================================================
-# Semantic Search
+# Semantic Search (FAISS-accelerated)
 # ==========================================================
 
 def semantic_search(
@@ -239,7 +287,7 @@ def semantic_search(
 ) -> List[Dict]:
 
     """
-    Search movies using semantic similarity.
+    Search movies using semantic similarity via FAISS ANN index.
 
     Returns:
         [
@@ -256,46 +304,44 @@ def semantic_search(
     if not query:
         return []
 
-    # Encode user query
-    query_embedding = embedding_model.encode(
+    # Encode user query to numpy, normalize for cosine similarity
+    query_vec = embedding_model.encode(
         query,
-        convert_to_tensor=True,
-    )
+        convert_to_numpy=True,
+    ).astype(np.float32).reshape(1, -1)
+    faiss.normalize_L2(query_vec)
 
-    # Cosine similarity
-    similarities = util.cos_sim(
-        query_embedding,
-        movie_embeddings,
-    )[0]
+    # Retrieve candidates from FAISS (get more than top_k for re-ranking headroom)
+    n_candidates = min(top_k * 4, faiss_index.ntotal)
+    similarities, candidate_indices = faiss_index.search(query_vec, n_candidates)
 
-    # Combine semantic similarity and weighted rating
+    sim_scores = similarities[0]        # shape: (n_candidates,)
+    cand_indices = candidate_indices[0]  # shape: (n_candidates,)
+
+    # Re-rank: blend FAISS cosine similarity with weighted rating
+    wr_values = df["weighted_rating_norm"].values
     final_scores = (
-        ALPHA * similarities.cpu().numpy()
-        + (1 - ALPHA)
-        * df["weighted_rating_norm"].values
+        ALPHA * sim_scores
+        + (1 - ALPHA) * wr_values[cand_indices]
     )
 
-    # Highest scores first
-    top_indices = np.argsort(final_scores)[::-1]
+    # Sort candidates by blended score descending
+    ranked_order = np.argsort(final_scores)[::-1]
 
     results = []
-
-    for idx in top_indices[:top_k]:
-
+    for rank_pos in ranked_order[:top_k]:
+        idx = int(cand_indices[rank_pos])
         results.append(
             {
                 "title": df.iloc[idx]["title"],
-                "score": round(
-                    float(final_scores[idx]),
-                    4,
-                ),
+                "score": round(float(final_scores[rank_pos]), 4),
             }
         )
 
     return results
 
 # ==========================================================
-# Similar Movie Search
+# Similar Movie Search (FAISS-accelerated)
 # ==========================================================
 
 def similar_movie(
@@ -304,7 +350,7 @@ def similar_movie(
 ) -> List[Dict]:
 
     """
-    Recommend movies similar to a given movie.
+    Recommend movies similar to a given movie via FAISS ANN index.
 
     Returns:
         [
@@ -324,36 +370,33 @@ def similar_movie(
     if movie_title not in title_to_index:
         return []
 
-    # Find the movie index
+    # Find the movie's position in the dataframe
     match_idx = title_to_index[movie_title]
+    loc = df.index.get_loc(match_idx)
 
-    # Get its embedding
-    search_embedding = movie_embeddings[
-        df.index.get_loc(match_idx)
-    ].unsqueeze(0)
+    # Get its normalized embedding for FAISS lookup
+    search_vec = embeddings_f32[loc].reshape(1, -1).copy()
 
-    # Cosine similarity
-    similarities = util.cos_sim(
-        search_embedding,
-        movie_embeddings,
-    )[0]
+    # Retrieve candidates from FAISS (extra headroom for filtering + re-ranking)
+    n_candidates = min((top_k + 1) * 4, faiss_index.ntotal)
+    similarities, candidate_indices = faiss_index.search(search_vec, n_candidates)
 
-    # Blend similarity with weighted rating
+    sim_scores = similarities[0]
+    cand_indices = candidate_indices[0]
+
+    # Re-rank: blend similarity with weighted rating
+    wr_values = df["weighted_rating_norm"].values
     final_scores = (
-        ALPHA * similarities.cpu().numpy()
-        + (1 - ALPHA)
-        * df["weighted_rating_norm"].values
+        ALPHA * sim_scores
+        + (1 - ALPHA) * wr_values[cand_indices]
     )
 
-    # Sort descending
-    top_indices = np.argsort(final_scores)[::-1]
+    # Sort candidates by blended score descending
+    ranked_order = np.argsort(final_scores)[::-1]
 
     results = []
-
-    for idx in top_indices:
-
-        idx = int(idx)
-
+    for rank_pos in ranked_order:
+        idx = int(cand_indices[rank_pos])
         title = df.iloc[idx]["title"]
 
         # Don't recommend the same movie
@@ -363,10 +406,7 @@ def similar_movie(
         results.append(
             {
                 "title": title,
-                "score": round(
-                    float(final_scores[idx]),
-                    4,
-                ),
+                "score": round(float(final_scores[rank_pos]), 4),
             }
         )
 

@@ -1,10 +1,10 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { Sparkles, Film, Search, Star, AlertCircle } from 'lucide-react';
+import { Sparkles, Film, Search, Star, AlertCircle, SlidersHorizontal } from 'lucide-react';
 
 interface EmptyStateProps {
-  icon?: 'film' | 'search' | 'star' | 'error';
+  icon?: 'film' | 'search' | 'star' | 'error' | 'filter';
   title: string;
   description: string;
   actionText?: string;
@@ -35,6 +35,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
         {icon === 'search' && <Search className="w-8 h-8" />}
         {icon === 'star' && <Star className="w-8 h-8 fill-[#f5b94d]" />}
         {icon === 'error' && <AlertCircle className="w-8 h-8 text-red-400" />}
+        {icon === 'filter' && <SlidersHorizontal className="w-8 h-8 text-[#f5b94d]" />}
       </div>
 
       <h3 className="text-xl md:text-2xl font-bold font-headline text-white mb-2 max-w-md">
