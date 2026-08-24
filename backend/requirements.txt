@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+python-dotenv
+requests
+pyjwt
+passlib[bcrypt]
+bcrypt
+numpy
+pandas
+scipy
+torch
+sentence-transformers
+scikit-learn
+faiss-cpu
