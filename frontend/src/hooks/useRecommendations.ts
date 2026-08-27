@@ -6,18 +6,21 @@ export interface SearchPayload {
   query: string;
   limit?: number;
   offset?: number;
+  language?: string;
 }
 
 export interface SimilarPayload {
   movieTitle: string;
   limit?: number;
   offset?: number;
+  language?: string;
 }
 
 export interface HybridPayload {
   ratings: Record<string, number>;
   limit?: number;
   offset?: number;
+  language?: string;
 }
 
 export const useSemanticSearch = () => {
@@ -26,7 +29,7 @@ export const useSemanticSearch = () => {
       if (typeof param === 'string') {
         return recommendationService.semanticSearch(param, 10, 0);
       }
-      return recommendationService.semanticSearch(param.query, param.limit ?? 10, param.offset ?? 0);
+      return recommendationService.semanticSearch(param.query, param.limit ?? 10, param.offset ?? 0, param.language);
     },
   });
 };
@@ -37,7 +40,7 @@ export const useSimilarMovie = () => {
       if (typeof param === 'string') {
         return recommendationService.similarMovie(param, 10, 0);
       }
-      return recommendationService.similarMovie(param.movieTitle, param.limit ?? 10, param.offset ?? 0);
+      return recommendationService.similarMovie(param.movieTitle, param.limit ?? 10, param.offset ?? 0, param.language);
     },
   });
 };
@@ -47,7 +50,7 @@ export const useHybridRecommendation = () => {
     mutationFn: (param) => {
       if (param && 'ratings' in param && typeof (param as HybridPayload).ratings === 'object') {
         const payload = param as HybridPayload;
-        return recommendationService.recommendHybrid(payload.ratings, payload.limit ?? 10, payload.offset ?? 0);
+        return recommendationService.recommendHybrid(payload.ratings, payload.limit ?? 10, payload.offset ?? 0, payload.language);
       }
       return recommendationService.recommendHybrid(param as Record<string, number>, 10, 0);
     },

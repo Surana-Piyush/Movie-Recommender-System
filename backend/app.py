@@ -263,7 +263,7 @@ def delete_rating(
 def semantic_search_api(request: SemanticSearchRequest):
     from recommender import semantic_search
 
-    results = semantic_search(request.query, top_k=50)
+    results = semantic_search(request.query, top_k=50, language=request.language)
     total_count = len(results)
     sliced_results = results[request.offset : request.offset + request.limit]
     movies = _fetch_details_parallel(sliced_results)
@@ -278,7 +278,7 @@ def semantic_search_api(request: SemanticSearchRequest):
 def similar_movie_api(request: SimilarMovieRequest):
     from recommender import similar_movie
 
-    results = similar_movie(request.movie_title, top_k=50)
+    results = similar_movie(request.movie_title, top_k=50, language=request.language)
     total_count = len(results)
     sliced_results = results[request.offset : request.offset + request.limit]
     movies = _fetch_details_parallel(sliced_results)
@@ -293,7 +293,7 @@ def similar_movie_api(request: SimilarMovieRequest):
 def recommend_api(request: HybridRecommendationRequest):
     from recommender import recommend_movies
 
-    results = recommend_movies(request.ratings, top_n=50)
+    results = recommend_movies(request.ratings, top_n=50, language=request.language)
     total_count = len(results)
     sliced_results = results[request.offset : request.offset + request.limit]
     movies = _fetch_details_parallel(sliced_results)

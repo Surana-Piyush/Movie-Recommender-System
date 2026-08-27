@@ -7,6 +7,7 @@ import { MovieCard } from '../components/MovieCard';
 import { SkeletonGrid } from '../components/SkeletonCard';
 import { EmptyState } from '../components/EmptyState';
 import { FilterDropdown, applyMovieFilters, INITIAL_FILTERS, type MovieFilterState } from '../components/FilterDropdown';
+import { LanguageFilter, type LanguageOption } from '../components/LanguageFilter';
 import { useSemanticSearch } from '../hooks/useRecommendations';
 import { recommendationService } from '../services/recommendation';
 import { useToast } from '../contexts/ToastContext';
@@ -16,6 +17,7 @@ export const SemanticSearch: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQuery = searchParams.get('q') || '';
   const [query, setQuery] = useState(initialQuery);
+  const [selectedLanguage, setSelectedLanguage] = useState<LanguageOption>('');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [filters, setFilters] = useState<MovieFilterState>(INITIAL_FILTERS);
 
@@ -28,15 +30,15 @@ export const SemanticSearch: React.FC = () => {
   const { showToast } = useToast();
 
   const examplePrompts = [
-    'Funny superhero comedy',
+    '3 Idiots college comedy',
+    'Bollywood romantic drama',
+    'Hindi action thriller',
     'Mind bending sci-fi time travel',
-    'Emotional romantic drama in Paris',
-    'Cyberpunk noir detective thriller',
     'Deep space horror thriller',
     'High adrenaline desert car chase',
   ];
 
-  const handleSearch = (queryText: string) => {
+  const handleSearch = (queryText: string, lang: LanguageOption = selectedLanguage) => {
     if (!queryText.trim()) return;
     setQuery(queryText);
     setSearchParams({ q: queryText });
@@ -44,7 +46,7 @@ export const SemanticSearch: React.FC = () => {
     setHasMore(false);
 
     semanticSearchMutation.mutate(
-      { query: queryText, limit: 10, offset: 0 },
+      { query: queryText, limit: 10, offset: 0, language: lang || undefined },
       {
         onSuccess: (data) => {
           setMoviesList(data.results || []);
@@ -58,11 +60,18 @@ export const SemanticSearch: React.FC = () => {
     );
   };
 
+  const handleLanguageChange = (lang: LanguageOption) => {
+    setSelectedLanguage(lang);
+    if (query.trim()) {
+      handleSearch(query, lang);
+    }
+  };
+
   const handleLoadMore = async () => {
     if (!query.trim() || isLoadingMore) return;
     setIsLoadingMore(true);
     try {
-      const res = await recommendationService.semanticSearch(query, 10, moviesList.length);
+      const res = await recommendationService.semanticSearch(query, 10, moviesList.length, selectedLanguage || undefined);
       setMoviesList((prev) => [...prev, ...(res.results || [])]);
       setHasMore(res.has_more ?? false);
     } catch (err: any) {
@@ -150,12 +159,15 @@ export const SemanticSearch: React.FC = () => {
                   Showing <span className="text-[#f5b94d]">{filteredResults.length}</span> Matches for "{query}"
                   {totalCount > 0 && <span className="text-xs text-gray-400 font-normal">({moviesList.length} of {totalCount} loaded)</span>}
                 </h2>
-                <FilterDropdown
-                  filters={filters}
-                  onFilterChange={setFilters}
-                  totalCount={moviesList.length}
-                  filteredCount={filteredResults.length}
-                />
+                <div className="flex items-center gap-3 flex-wrap">
+                  <LanguageFilter selectedLanguage={selectedLanguage} onChange={handleLanguageChange} />
+                  <FilterDropdown
+                    filters={filters}
+                    onFilterChange={setFilters}
+                    totalCount={moviesList.length}
+                    filteredCount={filteredResults.length}
+                  />
+                </div>
               </div>
 
               {filteredResults.length > 0 ? (

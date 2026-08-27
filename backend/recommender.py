@@ -41,7 +41,6 @@ drop_columns = [
     "revenue",
     "budget",
     "homepage",
-    "original_language",
     "original_title",
     "poster_path",
     "production_companies",
@@ -284,19 +283,12 @@ print("Recommender initialized successfully.")
 def semantic_search(
     query: str,
     top_k: int = TOP_K,
+    language: str | None = None,
 ) -> List[Dict]:
 
     """
     Search movies using semantic similarity via FAISS ANN index.
-
-    Returns:
-        [
-            {
-                "title": "...",
-                "score": 0.93
-            },
-            ...
-        ]
+    Supports optional language filtering (e.g. 'hi', 'en').
     """
 
     query = query.strip()
@@ -311,8 +303,9 @@ def semantic_search(
     ).astype(np.float32).reshape(1, -1)
     faiss.normalize_L2(query_vec)
 
-    # Retrieve candidates from FAISS (get more than top_k for re-ranking headroom)
-    n_candidates = min(top_k * 4, faiss_index.ntotal)
+    # Retrieve candidates from FAISS (increase headroom if filtering by language)
+    multiplier = 30 if language else 4
+    n_candidates = min(top_k * multiplier, faiss_index.ntotal)
     similarities, candidate_indices = faiss_index.search(query_vec, n_candidates)
 
     sim_scores = similarities[0]        # shape: (n_candidates,)
@@ -329,14 +322,23 @@ def semantic_search(
     ranked_order = np.argsort(final_scores)[::-1]
 
     results = []
-    for rank_pos in ranked_order[:top_k]:
+    for rank_pos in ranked_order:
         idx = int(cand_indices[rank_pos])
+
+        if language:
+            movie_lang = str(df.iloc[idx].get("original_language", "")).lower()
+            if movie_lang != language.lower():
+                continue
+
         results.append(
             {
                 "title": df.iloc[idx]["title"],
                 "score": round(float(final_scores[rank_pos]), 4),
             }
         )
+
+        if len(results) == top_k:
+            break
 
     return results
 
@@ -347,19 +349,12 @@ def semantic_search(
 def similar_movie(
     movie_title: str,
     top_k: int = TOP_K,
+    language: str | None = None,
 ) -> List[Dict]:
 
     """
     Recommend movies similar to a given movie via FAISS ANN index.
-
-    Returns:
-        [
-            {
-                "title": "...",
-                "score": 0.95
-            },
-            ...
-        ]
+    Supports optional language filtering.
     """
 
     movie_title = movie_title.strip().lower()
@@ -378,7 +373,8 @@ def similar_movie(
     search_vec = embeddings_f32[loc].reshape(1, -1).copy()
 
     # Retrieve candidates from FAISS (extra headroom for filtering + re-ranking)
-    n_candidates = min((top_k + 1) * 4, faiss_index.ntotal)
+    multiplier = 30 if language else 4
+    n_candidates = min((top_k + 1) * multiplier, faiss_index.ntotal)
     similarities, candidate_indices = faiss_index.search(search_vec, n_candidates)
 
     sim_scores = similarities[0]
@@ -403,6 +399,11 @@ def similar_movie(
         if title.lower() == movie_title:
             continue
 
+        if language:
+            movie_lang = str(df.iloc[idx].get("original_language", "")).lower()
+            if movie_lang != language.lower():
+                continue
+
         results.append(
             {
                 "title": title,
@@ -423,27 +424,11 @@ def recommend_movies(
     my_ratings: Dict[str, float],
     top_n: int = TOP_K,
     neighbours: int = 20,
+    language: str | None = None,
 ) -> List[Dict]:
     """
     Generate personalized recommendations using collaborative filtering.
-
-    Parameters
-    ----------
-    my_ratings
-        Example:
-        {
-            "Interstellar (2014)": 5,
-            "Inception (2010)": 4.5
-        }
-
-    Returns
-    -------
-        [
-            {
-                "title": "...",
-                "score": 4.81
-            }
-        ]
+    Supports optional language filtering.
     """
 
     if not my_ratings:
@@ -506,6 +491,12 @@ def recommend_movies(
             scores[movie]
             / similarity_sum[movie]
         )
+
+        if language and movie.lower() in title_to_index:
+            idx = title_to_index[movie.lower()]
+            movie_lang = str(df.iloc[idx].get("original_language", "")).lower()
+            if movie_lang != language.lower():
+                continue
 
         recommendations.append(
             {

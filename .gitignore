@@ -45,7 +45,7 @@ frontend/node_modules/
 *.db
 *.sqlite
 *.sqlite3
-TMDB_movie_dataset.csv
+!backend/data/TMDB_movie_dataset.csv
 movie.csv
 rating.csv
 movie_embeddings.npy

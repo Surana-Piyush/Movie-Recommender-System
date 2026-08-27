@@ -19,15 +19,18 @@ class SemanticSearchRequest(BaseModel):
     query: str
     limit: int = 10
     offset: int = 0
+    language: str | None = None
 
 
 class SimilarMovieRequest(BaseModel):
     movie_title: str
     limit: int = 10
     offset: int = 0
+    language: str | None = None
 
 
 class HybridRecommendationRequest(BaseModel):
     ratings: dict[str, float]
     limit: int = 10
-    offset: int = 0
+    offset: int = 0
+    language: str | None = None
