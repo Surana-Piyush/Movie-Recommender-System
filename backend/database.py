@@ -1,8 +1,8 @@
-from sqlalchemy import String,Integer,Column,create_engine
-from sqlalchemy.orm import declarative_base,sessionmaker
+from pathlib import Path
 
-DB_URL = "sqlite:///movies.db"
-engine = create_engine(DB_URL)
+BASE_DIR = Path(__file__).resolve().parent
+DB_URL = f"sqlite:///{BASE_DIR / 'movies.db'}"
+engine = create_engine(DB_URL, connect_args={"check_same_thread": False})
 Base = declarative_base()
 
 SessionLocal = sessionmaker(
