@@ -4,6 +4,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'https://cinecast-vpg6.onrender.
 
 export const api = axios.create({
   baseURL: API_URL,
+  timeout: 60000,
   headers: {
     'Content-Type': 'application/json',
   },
