@@ -68,28 +68,7 @@ def _fetch_details_parallel(results: list[dict]) -> list[dict]:
     return [movies_by_idx[i] for i in sorted(movies_by_idx.keys())]
 
 
-import threading
-
 app = FastAPI()
-
-def _warmup_recommender():
-    try:
-        import recommender
-        from tmdb import warmup_tmdb_session
-        
-        # 1. Warm up TMDB persistent HTTPS connection pool
-        warmup_tmdb_session()
-        
-        # 2. Run dummy search query to trigger PyTorch model compilation, tensor memory allocations, and FAISS index cache warming
-        recommender.semantic_search("sci-fi space movie", top_k=5)
-        
-        print("Recommender engine, PyTorch model, and connection pool pre-warmed successfully!")
-    except Exception as e:
-        print(f"Background recommender warmup note: {e}")
-
-@app.on_event("startup")
-def startup_event():
-    threading.Thread(target=_warmup_recommender, daemon=True).start()
 
 app.add_middleware(
     CORSMiddleware,

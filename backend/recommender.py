@@ -1,13 +1,9 @@
 import os
+import threading
 from typing import Dict, List
-
+from pathlib import Path
 import numpy as np
 import pandas as pd
-import torch
-from scipy.sparse import csr_matrix
-from sentence_transformers import SentenceTransformer, util
-from sklearn.neighbors import NearestNeighbors
-from pathlib import Path
 
 from config import IMAGE_BASE_URL, BACKDROP_BASE_URL
 
@@ -18,289 +14,212 @@ from config import IMAGE_BASE_URL, BACKDROP_BASE_URL
 ALPHA = 0.7
 TOP_K = 50
 
-# ==========================================================
-# Load TMDB Dataset
-# ==========================================================
-
-print("Loading TMDB dataset...")
-
-
-
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 
-# Auto-download missing dataset & vector embedding files from GitHub Release on deployment startup
-REMOTE_DATASET_FILES = {
-    DATA_DIR / "rating.csv": "https://github.com/Surana-Piyush/Movie-Recommender-System/releases/download/v.1.0.0/rating.csv",
-    BASE_DIR / "movie_embeddings.npy": "https://github.com/Surana-Piyush/Movie-Recommender-System/releases/download/v.1.0.0/movie_embeddings.npy",
-    BASE_DIR / "faiss_index.bin": "https://github.com/Surana-Piyush/Movie-Recommender-System/releases/download/v.1.0.0/faiss_index.bin",
-}
-
-for _local_path, _remote_url in REMOTE_DATASET_FILES.items():
-    if not _local_path.exists():
-        print(f"Downloading missing file {_local_path.name} from GitHub Release...")
-        try:
-            import urllib.request
-            _local_path.parent.mkdir(parents=True, exist_ok=True)
-            urllib.request.urlretrieve(_remote_url, _local_path)
-            print(f"Successfully downloaded {_local_path.name}")
-        except Exception as _e:
-            print(f"Warning: Failed to download {_local_path.name}: {_e}")
-
-df = pd.read_csv(DATA_DIR / "TMDB_movie_dataset.csv")
-movie_df = pd.read_csv(DATA_DIR / "movie.csv")
-rating_df = pd.read_csv(DATA_DIR / "rating.csv")
-EMBEDDING_FILE = BASE_DIR / "movie_embeddings.npy" if (BASE_DIR / "movie_embeddings.npy").exists() else DATA_DIR / "movie_embeddings.npy"
-
-# df = pd.read_csv("TMDB_movie_dataset.csv")
-
-drop_columns = [
-    "adult",
-    "status",
-    "revenue",
-    "budget",
-    "homepage",
-    "original_title",
-    "production_companies",
-    "production_countries",
-    "spoken_languages",
-]
-
-existing_drop_columns = [c for c in drop_columns if c in df.columns]
-df = df.drop(columns=existing_drop_columns)
-
-text_columns = [
-    "title",
-    "overview",
-    "tagline",
-    "genres",
-    "keywords",
-]
-
-df[text_columns] = df[text_columns].fillna("")
-df = df.dropna(subset=["title"])
-
-df["movie_text"] = (
-    df["title"]
-    + " "
-    + df["overview"]
-    + " "
-    + df["tagline"]
-    + " "
-    + df["genres"]
-    + " "
-    + df["keywords"]
-)
-
 # ==========================================================
-# Embedding Model
+# Lazy Loading State Globals
 # ==========================================================
 
-print("Loading SentenceTransformer model...")
+_is_loaded = False
+_load_lock = threading.Lock()
 
-try:
-    embedding_model = SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
-except Exception:
-    embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+df: pd.DataFrame | None = None
+movie_df: pd.DataFrame | None = None
+rating_df: pd.DataFrame | None = None
+embedding_model = None
+embeddings = None
+embeddings_f32 = None
+faiss_index = None
+knn_model = None
 
-# ==========================================================
-# Movie Embeddings
-# ==========================================================
-
-# EMBEDDING_FILE = "movie_embeddings.npy"
-
-if os.path.exists(EMBEDDING_FILE):
-    print("Loading saved embeddings...")
-    embeddings = np.load(EMBEDDING_FILE)
-    min_len = min(len(embeddings), len(df))
-    embeddings = embeddings[:min_len]
-    df = df.iloc[:min_len]
-else:
-    print("Generating embeddings...")
-    embeddings = embedding_model.encode(
-        df["movie_text"].tolist(),
-        batch_size=64,
-        show_progress_bar=True,
-    )
-    np.save(EMBEDDING_FILE, embeddings)
-
-# Zero-copy reference to save 173MB RAM on deployment instances
-movie_embeddings = torch.from_numpy(embeddings)
-
-print(f"Loaded {len(embeddings)} movie embeddings.")
-
-# ==========================================================
-# FAISS Approximate Nearest Neighbor Index
-# ==========================================================
-
-import faiss
-
-FAISS_INDEX_FILE = BASE_DIR / "faiss_index.bin"
-EMBEDDING_DIM = embeddings.shape[1]  # 384 for all-MiniLM-L6-v2
-
-# Normalize embeddings for cosine similarity (inner product on L2-normed vectors)
-embeddings_f32 = embeddings.astype(np.float32).copy()
-faiss.normalize_L2(embeddings_f32)
-
-if os.path.exists(FAISS_INDEX_FILE):
-    print("Loading saved FAISS index...")
-    faiss_index = faiss.read_index(str(FAISS_INDEX_FILE))
-    print(f"FAISS index loaded: {faiss_index.ntotal} vectors.")
-else:
-    print("Building FAISS IVF index (one-time operation)...")
-
-    # IVF with flat inner-product quantizer
-    # nlist = number of Voronoi cells; sqrt(n) is a good starting point
-    nlist = int(np.sqrt(len(embeddings_f32)))
-    nlist = max(nlist, 100)  # minimum 100 cells
-
-    quantizer = faiss.IndexFlatIP(EMBEDDING_DIM)
-    faiss_index = faiss.IndexIVFFlat(
-        quantizer, EMBEDDING_DIM, nlist, faiss.METRIC_INNER_PRODUCT
-    )
-
-    print(f"  Training IVF with {nlist} cells on {len(embeddings_f32)} vectors...")
-    faiss_index.train(embeddings_f32)
-
-    print("  Adding vectors to index...")
-    faiss_index.add(embeddings_f32)
-
-    faiss.write_index(faiss_index, str(FAISS_INDEX_FILE))
-    print(f"  FAISS index saved to {FAISS_INDEX_FILE}")
-
-# Number of cells to probe at query time (higher = better recall, slower)
-faiss_index.nprobe = 40
-
-print(f"FAISS index ready: {faiss_index.ntotal} vectors, dim={EMBEDDING_DIM}")
-
-# ==========================================================
-# Weighted Rating
-# ==========================================================
-
-C = df["vote_average"].mean()
-m = df["vote_count"].quantile(0.90)
+title_to_index: Dict[str, int] = {}
+tmdb_id_to_index: Dict[int, int] = {}
+title_to_id: Dict[str, int] = {}
+id_to_title: Dict[int, str] = {}
+user_to_idx: Dict[int, int] = {}
+movie_to_idx: Dict[int, int] = {}
+idx_to_movie: Dict[int, int] = {}
+movie_user_matrix = None
+EMBEDDING_DIM = 384
 
 
-def weighted_rating(row):
+def _ensure_recommender_loaded():
+    """
+    Lazy load all heavy ML resources (DataFrames, SentenceTransformer, FAISS Index, KNN Matrix)
+    exactly ONCE on first demand using a thread lock to keep application startup ultra-lightweight.
+    """
+    global _is_loaded, df, movie_df, rating_df, embedding_model, embeddings, embeddings_f32
+    global faiss_index, knn_model, title_to_index, tmdb_id_to_index, title_to_id, id_to_title
+    global user_to_idx, movie_to_idx, idx_to_movie, movie_user_matrix
 
-    v = row["vote_count"]
-    R = row["vote_average"]
+    if _is_loaded:
+        return
 
-    return (
-        (v / (v + m)) * R
-        + (m / (v + m)) * C
-    )
+    with _load_lock:
+        if _is_loaded:
+            return
 
+        print("=" * 65)
+        print("[RECOMMENDER LOG] Initializing heavy ML recommendation engine (lazy load on first request)...")
+        print("=" * 65)
 
-df["weighted_rating"] = df.apply(
-    weighted_rating,
-    axis=1,
-)
+        # 1. Download missing dataset files from GitHub Release if needed
+        REMOTE_DATASET_FILES = {
+            DATA_DIR / "rating.csv": "https://github.com/Surana-Piyush/Movie-Recommender-System/releases/download/v.1.0.0/rating.csv",
+            BASE_DIR / "movie_embeddings.npy": "https://github.com/Surana-Piyush/Movie-Recommender-System/releases/download/v.1.0.0/movie_embeddings.npy",
+            BASE_DIR / "faiss_index.bin": "https://github.com/Surana-Piyush/Movie-Recommender-System/releases/download/v.1.0.0/faiss_index.bin",
+        }
 
-wr_min = df["weighted_rating"].min()
-wr_max = df["weighted_rating"].max()
+        for _local_path, _remote_url in REMOTE_DATASET_FILES.items():
+            if not _local_path.exists():
+                print(f"[RECOMMENDER LOG] Downloading missing file {_local_path.name} from GitHub Release...")
+                try:
+                    import urllib.request
+                    _local_path.parent.mkdir(parents=True, exist_ok=True)
+                    urllib.request.urlretrieve(_remote_url, _local_path)
+                    print(f"[RECOMMENDER LOG] Successfully downloaded {_local_path.name}")
+                except Exception as _e:
+                    print(f"[RECOMMENDER LOG] Warning: Failed to download {_local_path.name}: {_e}")
 
-if wr_max > wr_min:
+        # 2. Load DataFrames
+        print("[RECOMMENDER LOG] Reading dataset CSV files...")
+        raw_df = pd.read_csv(DATA_DIR / "TMDB_movie_dataset.csv")
+        movie_df = pd.read_csv(DATA_DIR / "movie.csv")
+        rating_df = pd.read_csv(DATA_DIR / "rating.csv")
 
-    df["weighted_rating_norm"] = (
-        (df["weighted_rating"] - wr_min)
-        / (wr_max - wr_min)
-    )
+        # Memory optimization: drop unneeded columns
+        drop_columns = [
+            "adult", "status", "revenue", "budget", "homepage",
+            "original_title", "production_companies", "production_countries", "spoken_languages",
+        ]
+        existing_drop = [c for c in drop_columns if c in raw_df.columns]
+        raw_df = raw_df.drop(columns=existing_drop)
 
-else:
+        text_columns = ["title", "overview", "tagline", "genres", "keywords"]
+        raw_df[text_columns] = raw_df[text_columns].fillna("")
+        df = raw_df.dropna(subset=["title"]).copy()
 
-    df["weighted_rating_norm"] = 0.0
+        df["movie_text"] = (
+            df["title"] + " " + df["overview"] + " " + df["tagline"] + " " + df["genres"] + " " + df["keywords"]
+        )
 
-# ==========================================================
-# Lookup Dictionaries
-# ==========================================================
-
-print("Building lookup dictionaries...")
-
-title_to_index = {}
-tmdb_id_to_index = {}
-
-for idx, title in zip(df.index, df["title"]):
-    if pd.notna(title):
-        lower = str(title).strip().lower()
-        if lower not in title_to_index:
-            title_to_index[lower] = idx
-
-if "id" in df.columns:
-    for idx, tmdb_id in zip(df.index, df["id"]):
-        if pd.notna(tmdb_id):
+        # 3. Load Embeddings
+        EMBEDDING_FILE = BASE_DIR / "movie_embeddings.npy" if (BASE_DIR / "movie_embeddings.npy").exists() else DATA_DIR / "movie_embeddings.npy"
+        if os.path.exists(EMBEDDING_FILE):
+            print(f"[RECOMMENDER LOG] Loading saved embeddings ({EMBEDDING_FILE.name})...")
+            embeddings_f32 = np.load(EMBEDDING_FILE)
+            min_len = min(len(embeddings_f32), len(df))
+            embeddings_f32 = embeddings_f32[:min_len].copy()
+            df = df.iloc[:min_len].copy()
+        else:
+            print("[RECOMMENDER LOG] Generating embeddings via SentenceTransformer...")
+            from sentence_transformers import SentenceTransformer
             try:
-                tmdb_id_to_index[int(tmdb_id)] = idx
-            except (ValueError, TypeError):
-                pass
+                model_inst = SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
+            except Exception:
+                model_inst = SentenceTransformer("all-MiniLM-L6-v2")
+            embeddings_raw = model_inst.encode(df["movie_text"].tolist(), batch_size=64, show_progress_bar=False)
+            embeddings_f32 = np.ascontiguousarray(embeddings_raw, dtype=np.float32)
+            np.save(EMBEDDING_FILE, embeddings_f32)
 
-# ==========================================================
-# Load MovieLens Dataset
-# ==========================================================
+        # 4. Load FAISS Index
+        import faiss
+        FAISS_INDEX_FILE = BASE_DIR / "faiss_index.bin"
+        faiss.normalize_L2(embeddings_f32)
 
-print("Loading MovieLens dataset...")
+        if os.path.exists(FAISS_INDEX_FILE):
+            print(f"[RECOMMENDER LOG] Loading saved FAISS index from {FAISS_INDEX_FILE.name}...")
+            faiss_index = faiss.read_index(str(FAISS_INDEX_FILE))
+            print(f"[RECOMMENDER LOG] FAISS index ready with {faiss_index.ntotal} vectors.")
+        else:
+            print("[RECOMMENDER LOG] Building FAISS IVF index...")
+            nlist = max(int(np.sqrt(len(embeddings_f32))), 100)
+            quantizer = faiss.IndexFlatIP(EMBEDDING_DIM)
+            faiss_index = faiss.IndexIVFFlat(quantizer, EMBEDDING_DIM, nlist, faiss.METRIC_INNER_PRODUCT)
+            faiss_index.train(embeddings_f32)
+            faiss_index.add(embeddings_f32)
+            faiss.write_index(faiss_index, str(FAISS_INDEX_FILE))
 
-# movie_df = pd.read_csv("movie.csv")
-# rating_df = pd.read_csv("rating.csv")
+        faiss_index.nprobe = 40
 
-title_to_id = dict(
-    zip(movie_df["title"], movie_df["movieId"])
-)
+        # 5. Compute Weighted Ratings Norm
+        C = df["vote_average"].mean()
+        m = df["vote_count"].quantile(0.90)
 
-id_to_title = dict(
-    zip(movie_df["movieId"], movie_df["title"])
-)
+        def _calc_weighted_rating(row):
+            v = row["vote_count"]
+            R = row["vote_average"]
+            return ((v / (v + m)) * R) + ((m / (v + m)) * C)
 
-# ==========================================================
-# Sparse Matrix
-# ==========================================================
+        df["weighted_rating"] = df.apply(_calc_weighted_rating, axis=1)
+        wr_min = df["weighted_rating"].min()
+        wr_max = df["weighted_rating"].max()
+        if wr_max > wr_min:
+            df["weighted_rating_norm"] = (df["weighted_rating"] - wr_min) / (wr_max - wr_min)
+        else:
+            df["weighted_rating_norm"] = 0.0
 
-user_to_idx = {
-    u: i
-    for i, u in enumerate(
-        rating_df["userId"].unique()
-    )
-}
+        # 6. Build Lookup Dictionaries
+        title_to_index.clear()
+        tmdb_id_to_index.clear()
+        for idx, title_val in zip(df.index, df["title"]):
+            if pd.notna(title_val):
+                t_lower = str(title_val).strip().lower()
+                if t_lower not in title_to_index:
+                    title_to_index[t_lower] = idx
 
-movie_to_idx = {
-    m: i
-    for i, m in enumerate(
-        rating_df["movieId"].unique()
-    )
-}
+        if "id" in df.columns:
+            for idx, t_id in zip(df.index, df["id"]):
+                if pd.notna(t_id):
+                    try:
+                        tmdb_id_to_index[int(t_id)] = idx
+                    except (ValueError, TypeError):
+                        pass
 
-idx_to_movie = {
-    i: m
-    for m, i in movie_to_idx.items()
-}
+        # 7. MovieLens KNN
+        title_to_id.clear()
+        id_to_title.clear()
+        title_to_id.update(dict(zip(movie_df["title"], movie_df["movieId"])))
+        id_to_title.update(dict(zip(movie_df["movieId"], movie_df["title"])))
 
-rows = rating_df["movieId"].map(movie_to_idx)
-cols = rating_df["userId"].map(user_to_idx)
+        user_to_idx.clear()
+        movie_to_idx.clear()
+        idx_to_movie.clear()
 
-movie_user_matrix = csr_matrix(
-    (
-        rating_df["rating"],
-        (rows, cols),
-    )
-)
+        user_to_idx.update({u: i for i, u in enumerate(rating_df["userId"].unique())})
+        movie_to_idx.update({m: i for i, m in enumerate(rating_df["movieId"].unique())})
+        idx_to_movie.update({i: m for m, i in movie_to_idx.items()})
 
-# ==========================================================
-# KNN Model
-# ==========================================================
+        from scipy.sparse import csr_matrix
+        from sklearn.neighbors import NearestNeighbors
 
-print("Training collaborative filtering model...")
+        r_rows = rating_df["movieId"].map(movie_to_idx)
+        r_cols = rating_df["userId"].map(user_to_idx)
+        movie_user_matrix = csr_matrix((rating_df["rating"], (r_rows, r_cols)))
 
-knn_model = NearestNeighbors(
-    metric="cosine",
-    algorithm="brute",
-)
+        knn_model = NearestNeighbors(metric="cosine", algorithm="brute")
+        knn_model.fit(movie_user_matrix)
 
-knn_model.fit(movie_user_matrix)
+        _is_loaded = True
+        print("[RECOMMENDER LOG] Heavy ML recommendation engine loaded successfully!")
+        print("=" * 65)
 
-print("Recommender initialized successfully.")
+
+def _get_embedding_model():
+    global embedding_model
+    if embedding_model is None:
+        from sentence_transformers import SentenceTransformer
+        try:
+            embedding_model = SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
+        except Exception:
+            embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+    return embedding_model
+
 
 def format_movie_dict(idx: int, score: float = 0.0) -> dict:
     """Format a dataframe row into a complete Movie dict instantly without external API calls."""
+    _ensure_recommender_loaded()
     row = df.iloc[idx]
 
     poster = row.get("poster_path")
@@ -329,12 +248,15 @@ def format_movie_dict(idx: int, score: float = 0.0) -> dict:
         "score": round(float(score), 4),
     }
 
+
 def get_movie_by_id(tmdb_id: int) -> Dict | None:
     """Instantly lookup a movie from local dataset by its TMDB ID."""
+    _ensure_recommender_loaded()
     if tmdb_id in tmdb_id_to_index:
         idx = tmdb_id_to_index[tmdb_id]
         return format_movie_dict(idx)
     return None
+
 
 # ==========================================================
 # Semantic Search (FAISS-accelerated)
@@ -345,40 +267,31 @@ def semantic_search(
     top_k: int = TOP_K,
     language: str | None = None,
 ) -> List[Dict]:
-
     """
     Search movies using semantic similarity via FAISS ANN index.
     Supports optional language filtering (e.g. 'hi', 'en').
     """
-
     query = query.strip()
-
     if not query:
         return []
 
-    # Encode user query to numpy, normalize for cosine similarity
-    query_vec = embedding_model.encode(
-        query,
-        convert_to_numpy=True,
-    ).astype(np.float32).reshape(1, -1)
+    _ensure_recommender_loaded()
+    import faiss
+
+    model = _get_embedding_model()
+    query_vec = model.encode(query, convert_to_numpy=True).astype(np.float32).reshape(1, -1)
     faiss.normalize_L2(query_vec)
 
-    # Retrieve candidates from FAISS (increase headroom if filtering by language)
     multiplier = 30 if language else 4
     n_candidates = min(top_k * multiplier, faiss_index.ntotal)
     similarities, candidate_indices = faiss_index.search(query_vec, n_candidates)
 
-    sim_scores = similarities[0]        # shape: (n_candidates,)
-    cand_indices = candidate_indices[0]  # shape: (n_candidates,)
+    sim_scores = similarities[0]
+    cand_indices = candidate_indices[0]
 
-    # Re-rank: blend FAISS cosine similarity with weighted rating
     wr_values = df["weighted_rating_norm"].values
-    final_scores = (
-        ALPHA * sim_scores
-        + (1 - ALPHA) * wr_values[cand_indices]
-    )
+    final_scores = (ALPHA * sim_scores + (1 - ALPHA) * wr_values[cand_indices])
 
-    # Sort candidates by blended score descending
     ranked_order = np.argsort(final_scores)[::-1]
 
     results = []
@@ -397,6 +310,7 @@ def semantic_search(
 
     return results
 
+
 # ==========================================================
 # Similar Movie Search (FAISS-accelerated)
 # ==========================================================
@@ -406,36 +320,31 @@ def similar_movie(
     top_k: int = TOP_K,
     language: str | None = None,
 ) -> List[Dict]:
-
     """
     Recommend movies similar to a given movie via FAISS ANN index.
     Supports optional language filtering and fuzzy/substring/semantic fallback matching.
     """
-
     clean_title = movie_title.strip().lower()
-
     if not clean_title:
         return []
 
-    # 1. Exact match lookup
+    _ensure_recommender_loaded()
+    import faiss
+
     match_idx = title_to_index.get(clean_title)
 
-    # 2. Substring / prefix match lookup for autocomplete or partial terms
     if match_idx is None:
         for t_lower, idx in title_to_index.items():
             if clean_title in t_lower or t_lower.startswith(clean_title):
                 match_idx = idx
                 break
 
-    # 3. Fallback to semantic search if title is not indexed
     if match_idx is None:
         return semantic_search(movie_title, top_k=top_k, language=language)
 
-    # Get its normalized embedding for FAISS lookup
     loc = df.index.get_loc(match_idx)
     search_vec = embeddings_f32[loc].reshape(1, -1).copy()
 
-    # Retrieve candidates from FAISS (extra headroom for filtering + re-ranking)
     multiplier = 30 if language else 4
     n_candidates = min((top_k + 1) * multiplier, faiss_index.ntotal)
     similarities, candidate_indices = faiss_index.search(search_vec, n_candidates)
@@ -443,14 +352,9 @@ def similar_movie(
     sim_scores = similarities[0]
     cand_indices = candidate_indices[0]
 
-    # Re-rank: blend similarity with weighted rating
     wr_values = df["weighted_rating_norm"].values
-    final_scores = (
-        ALPHA * sim_scores
-        + (1 - ALPHA) * wr_values[cand_indices]
-    )
+    final_scores = (ALPHA * sim_scores + (1 - ALPHA) * wr_values[cand_indices])
 
-    # Sort candidates by blended score descending
     ranked_order = np.argsort(final_scores)[::-1]
 
     results = []
@@ -458,7 +362,6 @@ def similar_movie(
         idx = int(cand_indices[rank_pos])
         title = df.iloc[idx]["title"]
 
-        # Don't recommend the exact same movie
         if title.lower() == clean_title:
             continue
 
@@ -474,35 +377,32 @@ def similar_movie(
 
     return results
 
-# ==========================================================
-# Personalized Recommendations
-# ==========================================================
 
 # ==========================================================
-# Personalized Recommendations (Hybrid Collaborative + FAISS Content Blending)
+# Personalized Recommendations (Hybrid Collaborative + FAISS)
 # ==========================================================
 
 def _find_dataset_index_by_title(raw_title: str) -> int | None:
     """Helper to flexibly find the dataset row index for a given movie title."""
     if not raw_title:
         return None
-    
+    _ensure_recommender_loaded()
+
     clean = raw_title.strip().lower()
     if clean in title_to_index:
         return title_to_index[clean]
-    
-    # Strip year suffix e.g. "Dune (2021)" -> "Dune"
+
     import re
     title_no_year = re.sub(r"\s*\(\d{4}\)\s*$", "", clean).strip()
     if title_no_year in title_to_index:
         return title_to_index[title_no_year]
-    
-    # Partial substring match
+
     for t_lower, idx in title_to_index.items():
         if title_no_year and (title_no_year in t_lower or t_lower.startswith(title_no_year)):
             return idx
-            
+
     return None
+
 
 def recommend_movies(
     my_ratings: Dict[str, float],
@@ -514,9 +414,10 @@ def recommend_movies(
     Generate personalized recommendations using hybrid collaborative filtering
     and FAISS content-based vector embedding profile modeling.
     """
+    _ensure_recommender_loaded()
+    import faiss
 
     if not my_ratings:
-        # Fallback: top weighted rating movies
         top_indices = df.sort_values(by="weighted_rating", ascending=False).head(top_n).index
         return [format_movie_dict(idx, 0.90) for idx in top_indices]
 
@@ -527,7 +428,6 @@ def recommend_movies(
     watched_df_indices = set()
     watched_titles_lower = {t.strip().lower() for t in my_ratings.keys()}
 
-    # 1. Gather watched indices & build user preference embedding vector
     user_vector = np.zeros(EMBEDDING_DIM, dtype=np.float32)
     vector_weight_total = 0.0
 
@@ -535,14 +435,12 @@ def recommend_movies(
         idx = _find_dataset_index_by_title(movie_title)
         if idx is not None:
             watched_df_indices.add(idx)
-            # Add embedding vector weighted by rating (e.g. 5-star has weight +2.5, 1-star has weight -1.5)
             weight = float(user_rating) - 2.5
             if weight != 0:
                 loc = df.index.get_loc(idx)
                 user_vector += weight * embeddings_f32[loc]
                 vector_weight_total += abs(weight)
 
-        # Item-KNN collaborative filtering
         movie_title_clean = movie_title.strip()
         import re
         clean_no_year = re.sub(r"\s*\(\d{4}\)\s*$", "", movie_title_clean).strip().lower()
@@ -573,7 +471,6 @@ def recommend_movies(
                         collab_scores[n_idx] = collab_scores.get(n_idx, 0.0) + (similarity * user_rating_norm)
                         collab_weights[n_idx] = collab_weights.get(n_idx, 0.0) + similarity
 
-    # 2. Content-based FAISS embedding search from user_vector
     if vector_weight_total > 0 and np.linalg.norm(user_vector) > 0:
         faiss.normalize_L2(user_vector.reshape(1, -1))
         n_candidates = min((top_n + 15) * 5, faiss_index.ntotal)
@@ -582,10 +479,8 @@ def recommend_movies(
         for sim, cand_idx in zip(sims[0], cand_indices[0]):
             cand_idx = int(cand_idx)
             if cand_idx not in watched_df_indices:
-                # FAISS inner product on normalized vectors IS cosine similarity (0.0 to 1.0)
                 vector_scores[cand_idx] = max(float(sim), 0.0)
 
-    # 3. Combine candidates & compute clean match percentage (0.0 - 1.0)
     all_candidate_indices = set(collab_scores.keys()) | set(vector_scores.keys())
     recommendations = []
 
@@ -622,7 +517,6 @@ def recommend_movies(
 
     recommendations.sort(key=lambda x: x["score"], reverse=True)
 
-    # Fallback if candidates are few
     if len(recommendations) < top_n:
         existing_ids = {r["tmdb_id"] for r in recommendations}
         for idx in df.sort_values(by="weighted_rating", ascending=False).index:
