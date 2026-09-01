@@ -8,6 +8,7 @@ import { SemanticSearch } from './pages/SemanticSearch';
 import { SimilarMovie } from './pages/SimilarMovie';
 import { Recommendations } from './pages/Recommendations';
 import { Ratings } from './pages/Ratings';
+import { WatchlistPage } from './pages/Watchlist';
 import { Profile } from './pages/Profile';
 import { MovieDetail } from './pages/MovieDetail';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -37,6 +38,7 @@ export const App: React.FC = () => {
         <Route path="/semantic-search" element={<SemanticSearch />} />
         <Route path="/similar-movie" element={<SimilarMovie />} />
         <Route path="/hybrid-recommendation" element={<Recommendations />} />
+        <Route path="/watchlist" element={<WatchlistPage />} />
         <Route path="/ratings" element={<Ratings />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/movie/:tmdb_id" element={<MovieDetail />} />

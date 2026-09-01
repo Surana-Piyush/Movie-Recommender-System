@@ -19,6 +19,9 @@ import { SkeletonGrid } from '../components/SkeletonCard';
 import { EmptyState } from '../components/EmptyState';
 import { FilterDropdown, applyMovieFilters, INITIAL_FILTERS, type MovieFilterState } from '../components/FilterDropdown';
 
+import { useHybridRecommendation } from '../hooks/useRecommendations';
+import type { Movie } from '../types';
+
 export const Dashboard: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -27,6 +30,28 @@ export const Dashboard: React.FC = () => {
   const [filters, setFilters] = useState<MovieFilterState>(INITIAL_FILTERS);
 
   const { data: myRatings, isLoading: isLoadingRatings } = useMyRatings();
+  const hybridMutation = useHybridRecommendation();
+  const [personalizedPicks, setPersonalizedPicks] = useState<Movie[]>([]);
+
+  React.useEffect(() => {
+    if (myRatings && myRatings.length > 0) {
+      const payload: Record<string, number> = {};
+      myRatings.forEach((item: any) => {
+        const title = item.title || `Movie #${item.movie_id}`;
+        payload[title] = item.rating;
+      });
+      hybridMutation.mutate(
+        { ratings: payload, limit: 8, offset: 0 },
+        {
+          onSuccess: (data) => {
+            if (data.results && data.results.length > 0) {
+              setPersonalizedPicks(data.results);
+            }
+          },
+        }
+      );
+    }
+  }, [myRatings]);
 
   const featuredMovies = [
     {
@@ -75,7 +100,8 @@ export const Dashboard: React.FC = () => {
     },
   ];
 
-  const filteredMovies = applyMovieFilters(featuredMovies, filters);
+  const activePicks = personalizedPicks.length > 0 ? personalizedPicks : featuredMovies;
+  const filteredMovies = applyMovieFilters(activePicks, filters);
 
   const handleQuickSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -246,21 +272,36 @@ export const Dashboard: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
               {myRatings.slice(0, 4).map((item) => (
                 <div
-                  key={item.id}
-                  className="glass-card p-4 rounded-2xl border border-white/10 flex items-center justify-between gap-3"
+                  key={item.id || item.rating_id || item.movie_id}
+                  onClick={() => navigate(`/movie/${item.movie_id}`)}
+                  className="glass-card p-3.5 sm:p-4 rounded-2xl border border-white/10 flex items-center justify-between gap-3 cursor-pointer hover:border-[#f5b94d]/50 hover:-translate-y-0.5 transition-all group"
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-[#f5b94d] to-[#42e09a] flex items-center justify-center font-bold text-[#111318] text-xs sm:text-sm">
-                      {item.movie_id.toString().slice(-2)}
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-xs sm:text-sm font-bold font-headline text-white truncate max-w-[120px]">
-                        Movie #{item.movie_id}
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    {item.poster ? (
+                      <img
+                        src={item.poster}
+                        alt={item.title || `Movie #${item.movie_id}`}
+                        className="w-10 h-14 object-cover rounded-xl border border-white/10 shadow-md shrink-0 group-hover:scale-105 transition-transform"
+                      />
+                    ) : (
+                      <div className="w-10 h-14 rounded-xl bg-gradient-to-tr from-[#f5b94d]/20 to-[#42e09a]/20 border border-white/10 flex items-center justify-center shrink-0 text-[#f5b94d]">
+                        <Film className="w-5 h-5" />
+                      </div>
+                    )}
+                    <div className="flex flex-col min-w-0 flex-1">
+                      <span className="text-xs sm:text-sm font-bold font-headline text-white truncate group-hover:text-[#f5b94d] transition-colors">
+                        {item.title || `Movie #${item.movie_id}`}
                       </span>
-                      <span className="text-[10px] sm:text-xs text-gray-400">User Rating</span>
+                      {item.release_date ? (
+                        <span className="text-[10px] sm:text-xs text-gray-400 font-medium">
+                          {new Date(item.release_date).getFullYear()}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] sm:text-xs text-gray-400">User Rating</span>
+                      )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 text-[#f5b94d] font-bold text-xs sm:text-sm bg-[#111318] px-2.5 py-1 rounded-full border border-[#f5b94d]/30">
+                  <div className="flex items-center gap-1 text-[#f5b94d] font-bold text-xs sm:text-sm bg-[#111318] px-2.5 py-1 rounded-full border border-[#f5b94d]/30 shrink-0">
                     <Star className="w-3.5 h-3.5 fill-[#f5b94d]" />
                     {item.rating}/5
                   </div>

@@ -481,6 +481,32 @@ def similar_movie(
 # Personalized Recommendations
 # ==========================================================
 
+# ==========================================================
+# Personalized Recommendations (Hybrid Collaborative + FAISS Content Blending)
+# ==========================================================
+
+def _find_dataset_index_by_title(raw_title: str) -> int | None:
+    """Helper to flexibly find the dataset row index for a given movie title."""
+    if not raw_title:
+        return None
+    
+    clean = raw_title.strip().lower()
+    if clean in title_to_index:
+        return title_to_index[clean]
+    
+    # Strip year suffix e.g. "Dune (2021)" -> "Dune"
+    import re
+    title_no_year = re.sub(r"\s*\(\d{4}\)\s*$", "", clean).strip()
+    if title_no_year in title_to_index:
+        return title_to_index[title_no_year]
+    
+    # Partial substring match
+    for t_lower, idx in title_to_index.items():
+        if title_no_year and (title_no_year in t_lower or t_lower.startswith(title_no_year)):
+            return idx
+            
+    return None
+
 def recommend_movies(
     my_ratings: Dict[str, float],
     top_n: int = TOP_K,
@@ -488,83 +514,127 @@ def recommend_movies(
     language: str | None = None,
 ) -> List[Dict]:
     """
-    Generate personalized recommendations using collaborative filtering.
-    Supports optional language filtering.
+    Generate personalized recommendations using hybrid collaborative filtering
+    and FAISS content-based vector embedding profile modeling.
     """
 
     if not my_ratings:
-        return []
+        # Fallback: top weighted rating movies
+        top_indices = df.sort_values(by="weighted_rating", ascending=False).head(top_n).index
+        return [format_movie_dict(idx, 0.90) for idx in top_indices]
 
-    scores = {}
-    similarity_sum = {}
+    collab_scores: Dict[int, float] = {}
+    collab_weights: Dict[int, float] = {}
+    vector_scores: Dict[int, float] = {}
 
-    watched_movies = set(my_ratings.keys())
+    watched_df_indices = set()
+    watched_titles_lower = {t.strip().lower() for t in my_ratings.keys()}
+
+    # 1. Gather watched indices & build user preference embedding vector
+    user_vector = np.zeros(EMBEDDING_DIM, dtype=np.float32)
+    vector_weight_total = 0.0
 
     for movie_title, user_rating in my_ratings.items():
+        idx = _find_dataset_index_by_title(movie_title)
+        if idx is not None:
+            watched_df_indices.add(idx)
+            # Add embedding vector weighted by rating (e.g. 5-star has weight +2.5, 1-star has weight -1.5)
+            weight = float(user_rating) - 2.5
+            if weight != 0:
+                loc = df.index.get_loc(idx)
+                user_vector += weight * embeddings_f32[loc]
+                vector_weight_total += abs(weight)
 
-        if movie_title not in title_to_id:
-            continue
+        # Item-KNN collaborative filtering
+        movie_title_clean = movie_title.strip()
+        import re
+        clean_no_year = re.sub(r"\s*\(\d{4}\)\s*$", "", movie_title_clean).strip().lower()
 
-        movie_id = title_to_id[movie_title]
+        ml_movie_id = None
+        if movie_title_clean in title_to_id:
+            ml_movie_id = title_to_id[movie_title_clean]
+        else:
+            for m_t, m_id in title_to_id.items():
+                if clean_no_year and clean_no_year in m_t.lower():
+                    ml_movie_id = m_id
+                    break
 
-        if movie_id not in movie_to_idx:
-            continue
-
-        movie_index = movie_to_idx[movie_id]
-
-        distances, indices = knn_model.kneighbors(
-            movie_user_matrix[movie_index],
-            n_neighbors=neighbours,
-        )
-
-        for distance, neighbour_index in zip(
-            distances[0][1:],
-            indices[0][1:],
-        ):
-
-            similarity = 1 - distance
-
-            neighbour_movie_id = idx_to_movie[neighbour_index]
-
-            if neighbour_movie_id not in id_to_title:
-                continue
-
-            neighbour_title = id_to_title[neighbour_movie_id]
-
-            if neighbour_title in watched_movies:
-                continue
-
-            scores[neighbour_title] = (
-                scores.get(neighbour_title, 0)
-                + similarity * user_rating
+        if ml_movie_id and ml_movie_id in movie_to_idx:
+            movie_index = movie_to_idx[ml_movie_id]
+            distances, indices = knn_model.kneighbors(
+                movie_user_matrix[movie_index],
+                n_neighbors=neighbours,
             )
+            user_rating_norm = float(user_rating) / 5.0
+            for distance, neighbour_index in zip(distances[0][1:], indices[0][1:]):
+                similarity = max(1.0 - distance, 0.0)
+                neighbour_movie_id = idx_to_movie[neighbour_index]
+                if neighbour_movie_id in id_to_title:
+                    n_title = id_to_title[neighbour_movie_id]
+                    n_idx = title_to_index.get(n_title.lower())
+                    if n_idx is not None and n_idx not in watched_df_indices:
+                        collab_scores[n_idx] = collab_scores.get(n_idx, 0.0) + (similarity * user_rating_norm)
+                        collab_weights[n_idx] = collab_weights.get(n_idx, 0.0) + similarity
 
-            similarity_sum[neighbour_title] = (
-                similarity_sum.get(neighbour_title, 0)
-                + similarity
-            )
+    # 2. Content-based FAISS embedding search from user_vector
+    if vector_weight_total > 0 and np.linalg.norm(user_vector) > 0:
+        faiss.normalize_L2(user_vector.reshape(1, -1))
+        n_candidates = min((top_n + 15) * 5, faiss_index.ntotal)
+        sims, cand_indices = faiss_index.search(user_vector.reshape(1, -1), n_candidates)
 
+        for sim, cand_idx in zip(sims[0], cand_indices[0]):
+            cand_idx = int(cand_idx)
+            if cand_idx not in watched_df_indices:
+                # FAISS inner product on normalized vectors IS cosine similarity (0.0 to 1.0)
+                vector_scores[cand_idx] = max(float(sim), 0.0)
+
+    # 3. Combine candidates & compute clean match percentage (0.0 - 1.0)
+    all_candidate_indices = set(collab_scores.keys()) | set(vector_scores.keys())
     recommendations = []
 
-    for movie in scores:
+    for idx in all_candidate_indices:
+        title = df.iloc[idx]["title"]
+        if title.strip().lower() in watched_titles_lower:
+            continue
 
-        final_score = (
-            scores[movie]
-            / similarity_sum[movie]
-        )
+        if language:
+            movie_lang = str(df.iloc[idx].get("original_language", "")).lower()
+            if movie_lang != language.lower():
+                continue
 
-        if movie.lower() in title_to_index:
-            idx = title_to_index[movie.lower()]
-            if language:
-                movie_lang = str(df.iloc[idx].get("original_language", "")).lower()
-                if movie_lang != language.lower():
-                    continue
+        c_score = None
+        if idx in collab_scores and collab_weights.get(idx, 0) > 0:
+            c_score = collab_scores[idx] / collab_weights[idx]
 
-            recommendations.append(format_movie_dict(idx, final_score))
+        v_score = vector_scores.get(idx)
 
-    recommendations.sort(
-        key=lambda x: x["score"],
-        reverse=True,
-    )
+        if c_score is not None and v_score is not None:
+            raw_match = 0.5 * c_score + 0.5 * v_score
+        elif v_score is not None:
+            raw_match = v_score
+        elif c_score is not None:
+            raw_match = c_score
+        else:
+            raw_match = 0.5
+
+        wr_norm = float(df.iloc[idx].get("weighted_rating_norm", 0.5))
+        blended = 0.75 * raw_match + 0.25 * wr_norm
+        final_score = min(max(blended, 0.05), 0.99)
+
+        recommendations.append(format_movie_dict(idx, final_score))
+
+    recommendations.sort(key=lambda x: x["score"], reverse=True)
+
+    # Fallback if candidates are few
+    if len(recommendations) < top_n:
+        existing_ids = {r["tmdb_id"] for r in recommendations}
+        for idx in df.sort_values(by="weighted_rating", ascending=False).index:
+            if idx not in watched_df_indices:
+                m_dict = format_movie_dict(idx, 0.88)
+                if m_dict["tmdb_id"] not in existing_ids:
+                    recommendations.append(m_dict)
+                    existing_ids.add(m_dict["tmdb_id"])
+                    if len(recommendations) >= top_n:
+                        break
 
     return recommendations[:top_n]

@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Star, Sparkles, Eye, Film } from 'lucide-react';
+import { Star, Sparkles, Eye, Film, Bookmark } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { Movie } from '../types';
 import { RatingModal } from './RatingModal';
+import { useWatchlist, useAddToWatchlist, useRemoveFromWatchlist } from '../hooks/useWatchlist';
+import { useToast } from '../contexts/ToastContext';
 
 interface MovieCardProps {
   movie: Movie;
@@ -15,12 +17,36 @@ export const MovieCard: React.FC<MovieCardProps> = ({ movie, userRating }) => {
   const [isRatingOpen, setIsRatingOpen] = useState(false);
   const [imgError, setImgError] = useState(false);
 
+  const { data: watchlistItems } = useWatchlist();
+  const addToWatchlistMutation = useAddToWatchlist();
+  const removeFromWatchlistMutation = useRemoveFromWatchlist();
+  const { showToast } = useToast();
+
+  const inWatchlist = Boolean(watchlistItems?.some((item) => item.movie_id === movie.tmdb_id));
+
+  const handleWatchlistClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!movie.tmdb_id) return;
+    try {
+      if (inWatchlist) {
+        await removeFromWatchlistMutation.mutateAsync(movie.tmdb_id);
+        showToast('info', 'Removed from Watchlist', `"${movie.title}" removed from watchlist.`);
+      } else {
+        await addToWatchlistMutation.mutateAsync(movie.tmdb_id);
+        showToast('success', 'Added to Watchlist', `"${movie.title}" saved to watchlist.`);
+      }
+    } catch (err) {
+      showToast('error', 'Watchlist Failed', 'Unable to update watchlist.');
+    }
+  };
+
   const releaseYear = movie.release_date
     ? new Date(movie.release_date).getFullYear()
     : 'N/A';
 
-  const matchPercentage = movie.score
-    ? Math.round(movie.score * 100)
+  const matchPercentage = movie.score != null
+    ? Math.min(Math.round(movie.score <= 1 ? movie.score * 100 : movie.score), 100)
     : null;
 
   const getPosterUrl = (url?: string | null) => {
@@ -82,8 +108,21 @@ export const MovieCard: React.FC<MovieCardProps> = ({ movie, userRating }) => {
             </div>
           )}
 
+          <button
+            type="button"
+            onClick={handleWatchlistClick}
+            className={`absolute top-3 left-3 z-30 p-2 rounded-full backdrop-blur-md border transition-all ${
+              inWatchlist
+                ? 'bg-[#42e09a] text-[#0b0d12] border-[#42e09a] shadow-[0_0_12px_rgba(66,224,154,0.5)]'
+                : 'bg-[#111318]/70 text-gray-300 border-white/15 hover:text-white hover:bg-white/20'
+            }`}
+            title={inWatchlist ? 'In Watchlist' : 'Add to Watchlist'}
+          >
+            <Bookmark className={`w-3.5 h-3.5 ${inWatchlist ? 'fill-[#0b0d12]' : ''}`} />
+          </button>
+
           {userRating && (
-            <div className="absolute top-3 left-3 z-10 px-2.5 py-1 rounded-full font-bold text-xs bg-[#111318]/80 backdrop-blur-md text-[#f5b94d] border border-[#f5b94d]/40 flex items-center gap-1">
+            <div className="absolute top-3 left-12 z-10 px-2.5 py-1 rounded-full font-bold text-xs bg-[#111318]/80 backdrop-blur-md text-[#f5b94d] border border-[#f5b94d]/40 flex items-center gap-1">
               <Star className="w-3.5 h-3.5 fill-[#f5b94d]" />
               You: {userRating}/5
             </div>

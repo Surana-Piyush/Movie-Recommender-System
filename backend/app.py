@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from database import get_db, User, Rating
-from auth_dependencies import get_current_user
+from database import get_db, User, Rating, Watchlist
+from auth_dependencies import get_current_user, get_current_user_optional
 from jwt_handler import create_token
 from auth import hash_password, verify_password
 from schema import (
@@ -226,6 +226,7 @@ def get_my_ratings(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    from recommender import get_movie_by_id
 
     ratings = db.execute(
         select(Rating).where(
@@ -233,7 +234,27 @@ def get_my_ratings(
         )
     ).scalars().all()
 
-    return ratings
+    enriched_ratings = []
+    for r in ratings:
+        details = get_movie_by_id(r.movie_id) or getDetailsById(r.movie_id)
+        title = details["title"] if details else f"Movie #{r.movie_id}"
+        poster = details.get("poster") if details else None
+        backdrop = details.get("backdrop") if details else None
+        release_date = details.get("release_date") if details else ""
+
+        enriched_ratings.append({
+            "id": r.rating_id,
+            "rating_id": r.rating_id,
+            "user_id": r.user_id,
+            "movie_id": r.movie_id,
+            "rating": r.rating,
+            "title": title,
+            "poster": poster,
+            "backdrop": backdrop,
+            "release_date": release_date
+        })
+
+    return enriched_ratings
 
 @app.delete("/rating/{movie_id}")
 def delete_rating(
@@ -262,6 +283,87 @@ def delete_rating(
     return {
         "message": "Rating deleted successfully"
     }
+
+
+@app.get("/watchlist")
+def get_my_watchlist(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    from recommender import get_movie_by_id
+
+    items = db.execute(
+        select(Watchlist).where(Watchlist.user_id == current_user.user_id)
+    ).scalars().all()
+
+    enriched_watchlist = []
+    for item in items:
+        details = get_movie_by_id(item.movie_id) or getDetailsById(item.movie_id)
+        title = details["title"] if details else f"Movie #{item.movie_id}"
+        poster = details.get("poster") if details else None
+        backdrop = details.get("backdrop") if details else None
+        release_date = details.get("release_date") if details else ""
+        rating = details.get("rating", 0.0) if details else 0.0
+
+        enriched_watchlist.append({
+            "id": item.id,
+            "user_id": item.user_id,
+            "movie_id": item.movie_id,
+            "title": title,
+            "poster": poster,
+            "backdrop": backdrop,
+            "release_date": release_date,
+            "vote_average": rating,
+        })
+
+    return enriched_watchlist
+
+
+@app.post("/watchlist/{movie_id}")
+def add_to_watchlist(
+    movie_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    existing = db.execute(
+        select(Watchlist).where(
+            Watchlist.user_id == current_user.user_id,
+            Watchlist.movie_id == movie_id
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        return {"message": "Already in watchlist", "movie_id": movie_id}
+
+    item = Watchlist(user_id=current_user.user_id, movie_id=movie_id)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+
+    return {"message": "Added to watchlist", "movie_id": movie_id}
+
+
+@app.delete("/watchlist/{movie_id}")
+def remove_from_watchlist(
+    movie_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    items = db.execute(
+        select(Watchlist).where(
+            Watchlist.user_id == current_user.user_id,
+            Watchlist.movie_id == movie_id
+        )
+    ).scalars().all()
+
+    if not items:
+        raise HTTPException(status_code=404, detail="Watchlist item not found")
+
+    for item in items:
+        db.delete(item)
+    db.commit()
+
+    return {"message": "Removed from watchlist", "movie_id": movie_id}
 
 @app.post("/semantic-search")
 def semantic_search_api(request: SemanticSearchRequest):
@@ -294,10 +396,26 @@ def similar_movie_api(request: SimilarMovieRequest):
     }
 
 @app.post("/recommend")
-def recommend_api(request: HybridRecommendationRequest):
-    from recommender import recommend_movies
+def recommend_api(
+    request: HybridRecommendationRequest,
+    current_user: User | None = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    from recommender import recommend_movies, get_movie_by_id
 
-    results = recommend_movies(request.ratings, top_n=50, language=request.language)
+    ratings_dict = dict(request.ratings) if request.ratings else {}
+
+    # If no ratings payload provided, automatically pull logged-in user's database ratings
+    if not ratings_dict and current_user:
+        user_ratings = db.execute(
+            select(Rating).where(Rating.user_id == current_user.user_id)
+        ).scalars().all()
+        for r in user_ratings:
+            details = get_movie_by_id(r.movie_id) or getDetailsById(r.movie_id)
+            if details and details.get("title"):
+                ratings_dict[details["title"]] = float(r.rating)
+
+    results = recommend_movies(ratings_dict, top_n=50, language=request.language)
     total_count = len(results)
     sliced_results = results[request.offset : request.offset + request.limit]
     movies = _fetch_details_parallel(sliced_results)

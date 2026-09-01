@@ -9,13 +9,13 @@ import { MovieCard } from '../components/MovieCard';
 import { SkeletonGrid } from '../components/SkeletonCard';
 import { FilterDropdown, applyMovieFilters, INITIAL_FILTERS, type MovieFilterState } from '../components/FilterDropdown';
 import { useMovieDetails } from '../hooks/useRecommendations';
+import { useWatchlist, useAddToWatchlist, useRemoveFromWatchlist } from '../hooks/useWatchlist';
 import { useToast } from '../contexts/ToastContext';
 
 export const MovieDetail: React.FC = () => {
   const { tmdb_id } = useParams<{ tmdb_id: string }>();
   const navigate = useNavigate();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [inWatchlist, setInWatchlist] = useState(false);
   const [isRatingOpen, setIsRatingOpen] = useState(false);
   const [posterErr, setPosterErr] = useState(false);
   const [backdropErr, setBackdropErr] = useState(false);
@@ -23,19 +23,29 @@ export const MovieDetail: React.FC = () => {
 
   const { showToast } = useToast();
   const { data, isPending, error } = useMovieDetails(tmdb_id || '');
+  const { data: watchlistItems } = useWatchlist();
+  const addToWatchlistMutation = useAddToWatchlist();
+  const removeFromWatchlistMutation = useRemoveFromWatchlist();
 
   const movie = data?.movie;
+  const movieIdNum = movie?.tmdb_id || (tmdb_id ? parseInt(tmdb_id) : 0);
+  const inWatchlist = Boolean(watchlistItems?.some((item) => item.movie_id === movieIdNum));
   const similarMovies = data?.similar?.results || [];
   const filteredSimilar = applyMovieFilters(similarMovies, filters);
 
-
-  const handleWatchlistToggle = () => {
-    setInWatchlist(!inWatchlist);
-    showToast(
-      !inWatchlist ? 'success' : 'info',
-      !inWatchlist ? 'Added to Watchlist' : 'Removed from Watchlist',
-      `"${movie?.title || 'Movie'}" has been updated in your private watchlist.`
-    );
+  const handleWatchlistToggle = async () => {
+    if (!movieIdNum) return;
+    try {
+      if (inWatchlist) {
+        await removeFromWatchlistMutation.mutateAsync(movieIdNum);
+        showToast('info', 'Removed from Watchlist', `"${movie?.title || 'Movie'}" has been removed from your watchlist.`);
+      } else {
+        await addToWatchlistMutation.mutateAsync(movieIdNum);
+        showToast('success', 'Added to Watchlist', `"${movie?.title || 'Movie'}" has been saved to your private watchlist.`);
+      }
+    } catch (err) {
+      showToast('error', 'Watchlist Update Failed', 'Unable to update watchlist.');
+    }
   };
 
   const getPosterUrl = (url?: string | null) => {

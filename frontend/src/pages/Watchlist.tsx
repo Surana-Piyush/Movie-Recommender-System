@@ -1,46 +1,43 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Star, Trash2, Edit2, Film } from 'lucide-react';
+import { Bookmark, Trash2, Film, Star } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { Sidebar } from '../components/Sidebar';
-import { RatingStars } from '../components/RatingStars';
-import { RatingModal } from '../components/RatingModal';
 import { SkeletonGrid } from '../components/SkeletonCard';
 import { EmptyState } from '../components/EmptyState';
 import { FilterDropdown, applyMovieFilters, INITIAL_FILTERS, type MovieFilterState } from '../components/FilterDropdown';
-import { useMyRatings, useDeleteRating } from '../hooks/useRatings';
+import { useWatchlist, useRemoveFromWatchlist } from '../hooks/useWatchlist';
 import { useToast } from '../contexts/ToastContext';
 import type { Movie } from '../types';
 
-export const Ratings: React.FC = () => {
+export const WatchlistPage: React.FC = () => {
   const navigate = useNavigate();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [editingMovie, setEditingMovie] = useState<{ tmdb_id: number; title: string; rating: number; poster?: string | null } | null>(null);
   const [filters, setFilters] = useState<MovieFilterState>(INITIAL_FILTERS);
 
-  const { data: myRatings, isLoading } = useMyRatings();
-  const deleteMutation = useDeleteRating();
+  const { data: watchlistItems, isLoading } = useWatchlist();
+  const removeMutation = useRemoveFromWatchlist();
   const { showToast } = useToast();
 
-  const handleDelete = async (movieId: number) => {
+  const handleRemove = async (movieId: number, title: string) => {
     try {
-      await deleteMutation.mutateAsync(movieId);
-      showToast('success', 'Rating Deleted', 'The movie rating has been removed from your history.');
+      await removeMutation.mutateAsync(movieId);
+      showToast('info', 'Removed from Watchlist', `"${title}" has been removed from your watchlist.`);
     } catch (err) {
-      showToast('error', 'Delete Failed', 'Unable to remove rating.');
+      showToast('error', 'Remove Failed', 'Unable to remove movie from watchlist.');
     }
   };
 
-  // Map enriched user ratings to Movie interface for FilterDropdown compatibility & rich display
-  const mappedMovies: Movie[] = (myRatings || []).map((item: any) => ({
+  // Map watchlist items to Movie interface for FilterDropdown compatibility & rich display
+  const mappedMovies: Movie[] = (watchlistItems || []).map((item) => ({
     tmdb_id: item.movie_id,
-    title: item.title || `Movie #${item.movie_id}`,
+    title: item.title,
     overview: '',
     release_date: item.release_date || '',
-    rating: item.rating,
-    poster: item.poster || null,
-    backdrop: item.backdrop || null,
+    rating: item.vote_average || 0.0,
+    poster: item.poster,
+    backdrop: item.backdrop,
   }));
 
   const filteredMovies = applyMovieFilters(mappedMovies, filters);
@@ -53,30 +50,30 @@ export const Ratings: React.FC = () => {
       <main className="md:ml-64 pt-20 md:pt-24 pb-16 px-3 sm:px-4 md:px-8 max-w-7xl w-full mx-auto flex-1 flex flex-col gap-6 sm:gap-8">
         <section className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-6">
           <div>
-            <span className="text-xs uppercase tracking-widest font-bold text-[#f5b94d] flex items-center gap-1.5 mb-1">
-              <Star className="w-3.5 h-3.5 fill-[#f5b94d]" /> Personal Ratings History
+            <span className="text-xs uppercase tracking-widest font-bold text-[#42e09a] flex items-center gap-1.5 mb-1">
+              <Bookmark className="w-3.5 h-3.5 fill-[#42e09a]" /> Saved For Later
             </span>
             <h1 className="text-2xl sm:text-3xl font-extrabold font-headline text-white">
-              My Rated Movies
+              My Watchlist
             </h1>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <FilterDropdown
               filters={filters}
               onFilterChange={setFilters}
-              totalCount={myRatings?.length || 0}
+              totalCount={watchlistItems?.length || 0}
               filteredCount={filteredMovies.length}
             />
             <div className="px-3.5 py-2 rounded-xl glass-card border border-white/10 text-xs font-semibold text-gray-300">
-              Total: <span className="text-[#f5b94d] font-bold">{myRatings?.length || 0}</span>
+              Total Saved: <span className="text-[#42e09a] font-bold">{watchlistItems?.length || 0}</span>
             </div>
           </div>
         </section>
 
         <section className="w-full">
           {isLoading ? (
-            <SkeletonGrid count={6} message="Fetching user ratings from database..." />
-          ) : myRatings && myRatings.length > 0 ? (
+            <SkeletonGrid count={6} message="Fetching your saved watchlist..." />
+          ) : watchlistItems && watchlistItems.length > 0 ? (
             filteredMovies.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                 <AnimatePresence>
@@ -86,7 +83,7 @@ export const Ratings: React.FC = () => {
                       initial={{ opacity: 0, y: 15 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.9 }}
-                      className="glass-panel p-3.5 sm:p-4 rounded-2xl border border-white/10 flex items-center justify-between gap-3 sm:gap-4 shadow-xl hover:border-[#f5b94d]/40 transition-colors"
+                      className="glass-panel p-3.5 sm:p-4 rounded-2xl border border-white/10 flex items-center justify-between gap-3 sm:gap-4 shadow-xl hover:border-[#42e09a]/40 transition-colors"
                     >
                       <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
                         {item.poster ? (
@@ -98,7 +95,7 @@ export const Ratings: React.FC = () => {
                           />
                         ) : (
                           <div
-                            className="w-12 h-16 sm:w-14 sm:h-20 rounded-xl bg-gradient-to-tr from-[#f5b94d]/20 to-[#42e09a]/20 border border-white/10 flex items-center justify-center shrink-0 text-[#f5b94d] cursor-pointer"
+                            className="w-12 h-16 sm:w-14 sm:h-20 rounded-xl bg-gradient-to-tr from-[#42e09a]/20 to-[#f5b94d]/20 border border-white/10 flex items-center justify-center shrink-0 text-[#42e09a] cursor-pointer"
                             onClick={() => navigate(`/movie/${item.tmdb_id}`)}
                           >
                             <Film className="w-6 h-6" />
@@ -108,7 +105,7 @@ export const Ratings: React.FC = () => {
                         <div className="flex flex-col min-w-0 flex-1">
                           <h4
                             onClick={() => navigate(`/movie/${item.tmdb_id}`)}
-                            className="font-bold text-xs sm:text-sm font-headline text-white truncate cursor-pointer hover:text-[#f5b94d] transition-colors"
+                            className="font-bold text-xs sm:text-sm font-headline text-white truncate cursor-pointer hover:text-[#42e09a] transition-colors"
                           >
                             {item.title}
                           </h4>
@@ -117,36 +114,21 @@ export const Ratings: React.FC = () => {
                               {new Date(item.release_date).getFullYear()}
                             </span>
                           )}
-                          <div className="mt-1 flex items-center gap-1.5">
-                            <RatingStars rating={item.rating} size="sm" />
-                            <span className="text-[11px] font-bold text-[#f5b94d]">({item.rating}/5)</span>
+                          <div className="mt-1 flex items-center gap-1 text-[11px] font-bold text-[#f5b94d]">
+                            <Star className="w-3 h-3 fill-[#f5b94d]" />
+                            <span>{item.rating ? item.rating.toFixed(1) : 'N/A'}</span>
                           </div>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
                         <button
-                          onClick={() =>
-                            setEditingMovie({
-                              tmdb_id: item.tmdb_id,
-                              title: item.title,
-                              rating: item.rating,
-                              poster: item.poster,
-                            })
-                          }
-                          className="p-1.5 sm:p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-xl transition-colors"
-                          title="Edit Rating"
+                          onClick={() => handleRemove(item.tmdb_id, item.title)}
+                          disabled={removeMutation.isPending}
+                          className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-colors"
+                          title="Remove from Watchlist"
                         >
-                          <Edit2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                        </button>
-
-                        <button
-                          onClick={() => handleDelete(item.tmdb_id)}
-                          disabled={deleteMutation.isPending}
-                          className="p-1.5 sm:p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-colors"
-                          title="Delete Rating"
-                        >
-                          <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </motion.div>
@@ -156,29 +138,20 @@ export const Ratings: React.FC = () => {
             ) : (
               <EmptyState
                 icon="filter"
-                title="No ratings match selected filters."
-                description="Try lowering the minimum rating or clearing filter selections."
+                title="No watchlist movies match selected filters."
+                description="Try broadening your filter criteria."
               />
             )
           ) : (
             <EmptyState
-              icon="star"
-              title="You haven't rated any movies yet."
-              description="Start rating movies across CineCast AI to personalize your collaborative recommendations."
-              actionText="Explore & Rate Movies"
+              icon="film"
+              title="Your Watchlist is Empty"
+              description="Explore movies across CineCast AI and click 'Add to Watchlist' to save titles for later."
+              actionText="Explore Movies"
               actionLink="/semantic-search"
             />
           )}
         </section>
-
-        {editingMovie && (
-          <RatingModal
-            isOpen={!!editingMovie}
-            onClose={() => setEditingMovie(null)}
-            movie={{ tmdb_id: editingMovie.tmdb_id, title: editingMovie.title, poster: editingMovie.poster }}
-            existingRating={editingMovie.rating}
-          />
-        )}
       </main>
     </div>
   );

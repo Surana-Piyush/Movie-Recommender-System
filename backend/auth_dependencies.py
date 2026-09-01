@@ -48,3 +48,18 @@ def get_current_user(
         )
 
     return existing_user
+
+
+def get_current_user_optional(
+    token: str | None = Depends(OAuth2PasswordBearer(tokenUrl="login", auto_error=False)),
+    db: Session = Depends(get_db)
+) -> User | None:
+    if not token:
+        return None
+    try:
+        payload = verify_token(token)
+        if not payload or "user_id" not in payload:
+            return None
+        return db.execute(select(User).where(User.user_id == payload["user_id"])).scalar_one_or_none()
+    except Exception:
+        return None

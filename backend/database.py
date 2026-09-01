@@ -28,6 +28,13 @@ class Rating(Base):
     movie_id = Column(Integer)
     rating = Column(Integer)
 
+class Watchlist(Base):
+    __tablename__ = "watchlist"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=False)
+    movie_id = Column(Integer, nullable=False)
+
 Base.metadata.create_all(bind=engine)
 
 def get_db():

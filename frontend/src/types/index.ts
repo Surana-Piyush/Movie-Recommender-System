@@ -37,10 +37,15 @@ export interface MovieResponse {
 }
 
 export interface Rating {
-  id: number;
+  id?: number;
+  rating_id?: number;
   user_id: number;
   movie_id: number;
   rating: number;
+  title?: string;
+  poster?: string | null;
+  backdrop?: string | null;
+  release_date?: string;
 }
 
 export interface UserRatingItem {
@@ -56,4 +61,15 @@ export interface ToastMessage {
   type: 'success' | 'error' | 'info';
   title: string;
   description?: string;
+}
+
+export interface WatchlistItem {
+  id: number;
+  user_id: number;
+  movie_id: number;
+  title: string;
+  poster: string | null;
+  backdrop: string | null;
+  release_date: string;
+  vote_average: number;
 }

@@ -6,6 +6,7 @@ import {
   Film,
   ThumbsUp,
   Star,
+  Bookmark,
   User,
   LogOut,
   X,
@@ -27,6 +28,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileOpen = false, onMobile
     { label: 'Semantic Search', path: '/semantic-search', icon: Sparkles },
     { label: 'Similar Movies', path: '/similar-movie', icon: Film },
     { label: 'Because You Liked', path: '/hybrid-recommendation', icon: ThumbsUp },
+    { label: 'Watchlist', path: '/watchlist', icon: Bookmark },
     { label: 'My Ratings', path: '/ratings', icon: Star },
     { label: 'Profile', path: '/profile', icon: User },
   ];
