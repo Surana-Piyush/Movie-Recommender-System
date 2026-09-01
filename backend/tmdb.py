@@ -117,10 +117,22 @@ def getDetails(movieName: str) -> dict | None:
         except Exception:
             pass
 
-    if not results:
-        return None
+    if results:
+        return _build_movie_dict(results[0], fallback_title=movieName)
 
-    return _build_movie_dict(results[0], fallback_title=movieName)
+    # Local dataset fallback if TMDB API failed or returned no results
+    try:
+        from recommender import title_to_index, format_movie_dict
+        clean_lower = movieName.strip().lower()
+        if clean_lower in title_to_index:
+            return format_movie_dict(title_to_index[clean_lower])
+        for t_lower, idx in title_to_index.items():
+            if clean_lower in t_lower:
+                return format_movie_dict(idx)
+    except Exception:
+        pass
+
+    return None
 
 
 @lru_cache(maxsize=5_000)
@@ -136,14 +148,21 @@ def getDetailsById(tmdb_id: int) -> dict | None:
     }
 
     try:
-        response = _session.get(url, params=params, timeout=5)
+        response = _session.get(url, params=params, timeout=2)
+        if response.status_code == 200:
+            movie = response.json()
+            return _build_movie_dict(movie, fallback_title=f"Movie #{tmdb_id}")
     except Exception:
-        return None
+        pass
 
-    if response.status_code != 200:
-        return None
+    # Local dataset fallback if TMDB API network request failed/timed out
+    try:
+        from recommender import get_movie_by_id
+        local_movie = get_movie_by_id(tmdb_id)
+        if local_movie:
+            return local_movie
+    except Exception:
+        pass
 
-    movie = response.json()
-
-    return _build_movie_dict(movie, fallback_title=f"Movie #{tmdb_id}")
+    return None
 

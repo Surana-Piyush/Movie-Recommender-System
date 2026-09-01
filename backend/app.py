@@ -31,6 +31,10 @@ def _fetch_details_parallel(results: list[dict]) -> list[dict]:
     if not results:
         return []
 
+    # If results are already formatted with full local details, return immediately without network calls
+    if isinstance(results[0], dict) and "tmdb_id" in results[0] and ("poster" in results[0] or "overview" in results[0]):
+        return results
+
     # Submit all TMDB lookups concurrently
     future_to_idx = {}
     for idx, movie in enumerate(results):
@@ -319,10 +323,12 @@ def get_profile(
 
 @app.get("/movie/{tmdb_id}")
 def get_movie_details(tmdb_id: int):
-    from recommender import similar_movie, semantic_search
+    from recommender import similar_movie, semantic_search, get_movie_by_id
 
-    # Get movie details from TMDB using ID
-    details = getDetailsById(tmdb_id)
+    # 1. Try local dataset lookup first, or fallback to TMDB API
+    details = get_movie_by_id(tmdb_id)
+    if not details:
+        details = getDetailsById(tmdb_id)
 
     if not details:
         raise HTTPException(status_code=404, detail="Movie not found")

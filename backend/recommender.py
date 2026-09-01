@@ -9,6 +9,8 @@ from sentence_transformers import SentenceTransformer, util
 from sklearn.neighbors import NearestNeighbors
 from pathlib import Path
 
+from config import IMAGE_BASE_URL, BACKDROP_BASE_URL
+
 # ==========================================================
 # Configuration
 # ==========================================================
@@ -35,14 +37,12 @@ EMBEDDING_FILE = BASE_DIR / "movie_embeddings.npy" if (BASE_DIR / "movie_embeddi
 # df = pd.read_csv("TMDB_movie_dataset.csv")
 
 drop_columns = [
-    "backdrop_path",
     "adult",
     "status",
     "revenue",
     "budget",
     "homepage",
     "original_title",
-    "poster_path",
     "production_companies",
     "production_countries",
     "spoken_languages",
@@ -203,13 +203,21 @@ else:
 print("Building lookup dictionaries...")
 
 title_to_index = {}
+tmdb_id_to_index = {}
 
 for idx, title in zip(df.index, df["title"]):
+    if pd.notna(title):
+        lower = str(title).strip().lower()
+        if lower not in title_to_index:
+            title_to_index[lower] = idx
 
-    lower = title.lower()
-
-    if lower not in title_to_index:
-        title_to_index[lower] = idx
+if "id" in df.columns:
+    for idx, tmdb_id in zip(df.index, df["id"]):
+        if pd.notna(tmdb_id):
+            try:
+                tmdb_id_to_index[int(tmdb_id)] = idx
+            except (ValueError, TypeError):
+                pass
 
 # ==========================================================
 # Load MovieLens Dataset
@@ -276,6 +284,43 @@ knn_model.fit(movie_user_matrix)
 
 print("Recommender initialized successfully.")
 
+def format_movie_dict(idx: int, score: float = 0.0) -> dict:
+    """Format a dataframe row into a complete Movie dict instantly without external API calls."""
+    row = df.iloc[idx]
+
+    poster = row.get("poster_path")
+    backdrop = row.get("backdrop_path")
+
+    poster_url = None
+    if pd.notna(poster) and str(poster).strip():
+        p_str = str(poster).strip()
+        poster_url = p_str if p_str.startswith("http") else f"{IMAGE_BASE_URL}{p_str if p_str.startswith('/') else '/' + p_str}"
+
+    backdrop_url = None
+    if pd.notna(backdrop) and str(backdrop).strip():
+        b_str = str(backdrop).strip()
+        backdrop_url = b_str if b_str.startswith("http") else f"{BACKDROP_BASE_URL}{b_str if b_str.startswith('/') else '/' + b_str}"
+
+    tmdb_id = int(row["id"]) if ("id" in row and pd.notna(row["id"])) else int(idx)
+
+    return {
+        "tmdb_id": tmdb_id,
+        "title": str(row["title"]),
+        "overview": str(row["overview"]) if pd.notna(row.get("overview")) else "",
+        "release_date": str(row["release_date"]) if pd.notna(row.get("release_date")) else "",
+        "rating": round(float(row["vote_average"]), 1) if pd.notna(row.get("vote_average")) else 0.0,
+        "poster": poster_url,
+        "backdrop": backdrop_url,
+        "score": round(float(score), 4),
+    }
+
+def get_movie_by_id(tmdb_id: int) -> Dict | None:
+    """Instantly lookup a movie from local dataset by its TMDB ID."""
+    if tmdb_id in tmdb_id_to_index:
+        idx = tmdb_id_to_index[tmdb_id]
+        return format_movie_dict(idx)
+    return None
+
 # ==========================================================
 # Semantic Search (FAISS-accelerated)
 # ==========================================================
@@ -330,12 +375,7 @@ def semantic_search(
             if movie_lang != language.lower():
                 continue
 
-        results.append(
-            {
-                "title": df.iloc[idx]["title"],
-                "score": round(float(final_scores[rank_pos]), 4),
-            }
-        )
+        results.append(format_movie_dict(idx, final_scores[rank_pos]))
 
         if len(results) == top_k:
             break
@@ -354,22 +394,30 @@ def similar_movie(
 
     """
     Recommend movies similar to a given movie via FAISS ANN index.
-    Supports optional language filtering.
+    Supports optional language filtering and fuzzy/substring/semantic fallback matching.
     """
 
-    movie_title = movie_title.strip().lower()
+    clean_title = movie_title.strip().lower()
 
-    if not movie_title:
+    if not clean_title:
         return []
 
-    if movie_title not in title_to_index:
-        return []
+    # 1. Exact match lookup
+    match_idx = title_to_index.get(clean_title)
 
-    # Find the movie's position in the dataframe
-    match_idx = title_to_index[movie_title]
-    loc = df.index.get_loc(match_idx)
+    # 2. Substring / prefix match lookup for autocomplete or partial terms
+    if match_idx is None:
+        for t_lower, idx in title_to_index.items():
+            if clean_title in t_lower or t_lower.startswith(clean_title):
+                match_idx = idx
+                break
+
+    # 3. Fallback to semantic search if title is not indexed
+    if match_idx is None:
+        return semantic_search(movie_title, top_k=top_k, language=language)
 
     # Get its normalized embedding for FAISS lookup
+    loc = df.index.get_loc(match_idx)
     search_vec = embeddings_f32[loc].reshape(1, -1).copy()
 
     # Retrieve candidates from FAISS (extra headroom for filtering + re-ranking)
@@ -395,8 +443,8 @@ def similar_movie(
         idx = int(cand_indices[rank_pos])
         title = df.iloc[idx]["title"]
 
-        # Don't recommend the same movie
-        if title.lower() == movie_title:
+        # Don't recommend the exact same movie
+        if title.lower() == clean_title:
             continue
 
         if language:
@@ -404,12 +452,7 @@ def similar_movie(
             if movie_lang != language.lower():
                 continue
 
-        results.append(
-            {
-                "title": title,
-                "score": round(float(final_scores[rank_pos]), 4),
-            }
-        )
+        results.append(format_movie_dict(idx, final_scores[rank_pos]))
 
         if len(results) == top_k:
             break
@@ -492,21 +535,14 @@ def recommend_movies(
             / similarity_sum[movie]
         )
 
-        if language and movie.lower() in title_to_index:
+        if movie.lower() in title_to_index:
             idx = title_to_index[movie.lower()]
-            movie_lang = str(df.iloc[idx].get("original_language", "")).lower()
-            if movie_lang != language.lower():
-                continue
+            if language:
+                movie_lang = str(df.iloc[idx].get("original_language", "")).lower()
+                if movie_lang != language.lower():
+                    continue
 
-        recommendations.append(
-            {
-                "title": movie,
-                "score": round(
-                    float(final_score),
-                    4,
-                ),
-            }
-        )
+            recommendations.append(format_movie_dict(idx, final_score))
 
     recommendations.sort(
         key=lambda x: x["score"],
