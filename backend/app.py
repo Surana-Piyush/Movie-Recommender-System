@@ -1,22 +1,33 @@
-from fastapi import FastAPI, Depends, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from sqlalchemy import select
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import sys
+import traceback
 
-from database import get_db, User, Rating, Watchlist
-from auth_dependencies import get_current_user, get_current_user_optional
-from jwt_handler import create_token
-from auth import hash_password, verify_password
-from schema import (
-    UserCreate,
-    UserLogin,
-    RatingCreate,
-    SemanticSearchRequest,
-    SimilarMovieRequest,
-    HybridRecommendationRequest
-)
-from tmdb import getDetails, getDetailsById
+try:
+    from fastapi import FastAPI, Depends, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
+    from sqlalchemy.orm import Session
+    from sqlalchemy import select
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from database import get_db, User, Rating, Watchlist
+    from auth_dependencies import get_current_user, get_current_user_optional
+    from jwt_handler import create_token
+    from auth import hash_password, verify_password
+    from schema import (
+        UserCreate,
+        UserLogin,
+        RatingCreate,
+        SemanticSearchRequest,
+        SimilarMovieRequest,
+        HybridRecommendationRequest
+    )
+    from tmdb import getDetails, getDetailsById
+except Exception as _startup_err:
+    print("=" * 60, file=sys.stderr)
+    print("CRITICAL MODULE IMPORT ERROR DURING APP STARTUP:", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+    sys.stderr.flush()
+    raise _startup_err
 
 # Shared thread pool for parallel TMDB API fetching
 _tmdb_executor = ThreadPoolExecutor(max_workers=20)

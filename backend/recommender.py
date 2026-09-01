@@ -124,13 +124,10 @@ else:
     )
     np.save(EMBEDDING_FILE, embeddings)
 
-# Keep torch tensor for any remaining legacy code
-movie_embeddings = torch.tensor(
-    embeddings,
-    dtype=torch.float32
-)
+# Zero-copy reference to save 173MB RAM on deployment instances
+movie_embeddings = torch.from_numpy(embeddings)
 
-print(f"Loaded {len(movie_embeddings)} movie embeddings.")
+print(f"Loaded {len(embeddings)} movie embeddings.")
 
 # ==========================================================
 # FAISS Approximate Nearest Neighbor Index

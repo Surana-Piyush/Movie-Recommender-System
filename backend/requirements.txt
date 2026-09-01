@@ -4,6 +4,8 @@ sqlalchemy
 pydantic
 python-dotenv
 requests
+python-jose[cryptography]
+email-validator
 pyjwt
 passlib[bcrypt]
 bcrypt
