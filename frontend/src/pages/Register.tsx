@@ -40,7 +40,7 @@ export const Register: React.FC = () => {
       showToast('success', 'Account Created!', 'Welcome to CineCast AI.');
       navigate('/dashboard');
     } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Registration failed';
+      const msg = err.response?.data?.detail || err.message || 'Registration failed';
       setErrorMsg(msg);
       showToast('error', 'Registration Failed', msg);
     } finally {

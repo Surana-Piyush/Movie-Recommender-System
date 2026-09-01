@@ -29,7 +29,7 @@ export const Login: React.FC = () => {
       showToast('success', 'Welcome Back!', 'Logged in successfully to CineCast AI.');
       navigate('/dashboard');
     } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Invalid email or password';
+      const msg = err.response?.data?.detail || err.message || 'Invalid email or password';
       setErrorMsg(msg);
       showToast('error', 'Login Failed', msg);
     } finally {
