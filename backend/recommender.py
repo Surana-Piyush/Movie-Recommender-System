@@ -29,6 +29,24 @@ print("Loading TMDB dataset...")
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 
+# Auto-download missing dataset & vector embedding files from GitHub Release on deployment startup
+REMOTE_DATASET_FILES = {
+    DATA_DIR / "rating.csv": "https://github.com/Surana-Piyush/Movie-Recommender-System/releases/download/v.1.0.0/rating.csv",
+    BASE_DIR / "movie_embeddings.npy": "https://github.com/Surana-Piyush/Movie-Recommender-System/releases/download/v.1.0.0/movie_embeddings.npy",
+    BASE_DIR / "faiss_index.bin": "https://github.com/Surana-Piyush/Movie-Recommender-System/releases/download/v.1.0.0/faiss_index.bin",
+}
+
+for _local_path, _remote_url in REMOTE_DATASET_FILES.items():
+    if not _local_path.exists():
+        print(f"Downloading missing file {_local_path.name} from GitHub Release...")
+        try:
+            import urllib.request
+            _local_path.parent.mkdir(parents=True, exist_ok=True)
+            urllib.request.urlretrieve(_remote_url, _local_path)
+            print(f"Successfully downloaded {_local_path.name}")
+        except Exception as _e:
+            print(f"Warning: Failed to download {_local_path.name}: {_e}")
+
 df = pd.read_csv(DATA_DIR / "TMDB_movie_dataset.csv")
 movie_df = pd.read_csv(DATA_DIR / "movie.csv")
 rating_df = pd.read_csv(DATA_DIR / "rating.csv")
