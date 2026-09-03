@@ -45,11 +45,21 @@ frontend/node_modules/
 *.db
 *.sqlite
 *.sqlite3
+*.onnx
+*.pkl.gz
+
+# Track essential lightweight datasets & model files in git
 !backend/data/TMDB_movie_dataset.csv
-movie.csv
+!backend/data/movie.csv
+!backend/data/knn_compact.npz
+!backend/model_onnx/tokenizer.json
+
+# Explicitly ignore heavy datasets & temporary ML artifacts
 rating.csv
 movie_embeddings.npy
 faiss_index.bin
+model.onnx
+movies_metadata.db
 movies.db
 
 # Environment variables & Secrets
@@ -70,4 +80,4 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
-*~
+*~

@@ -11,8 +11,5 @@ passlib[bcrypt]
 bcrypt
 numpy
 pandas
-scipy
-torch
-sentence-transformers
-scikit-learn
-faiss-cpu
+onnxruntime
+tokenizers
